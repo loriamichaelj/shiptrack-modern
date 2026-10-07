@@ -100,8 +100,9 @@ shiptrack-modern/
 ├── tests/{unit,integration}/
 ├── pyproject.toml  uv.lock
 ├── Dockerfile  .dockerignore
+├── compose.yaml                # Local only: app + Postgres + LocalStack
 ├── charts/shiptrack/
-│   ├── Chart.yaml  values.yaml  values-dev.yaml  values.schema.json
+│   ├── Chart.yaml  values.yaml  values-dev.yaml  values.schema.json  ci-values.yaml
 │   └── templates/
 │       ├── _helpers.tpl
 │       ├── serviceaccounts.yaml
@@ -122,20 +123,25 @@ shiptrack-modern/
 ├── observability/
 │   ├── grafana/*.json
 │   └── cloudwatch/*.json
-├── runbooks/
-│   ├── deploy-rollback.md
-│   ├── dlq-redrive.md
-│   ├── canary-regression.md
-│   ├── node-failure.md
-│   └── wave-3-contract-migration.md
 ├── gamedays/GD-1..GD-4/        # README (hypothesis, steps, signals) + evidence/
 ├── docs/
 │   ├── DESIGN.md  ADR.md  FORK.md  slo.md
+│   ├── runbooks/
+│   │   ├── deploy-rollback.md
+│   │   ├── dlq-redrive.md
+│   │   ├── canary-regression.md
+│   │   ├── node-failure.md
+│   │   └── wave-3-contract-migration.md
+│   ├── migration/              # wave-N/ evidence (§9.3) and dora.csv
 │   ├── security/scan-report.md
 │   └── cost/analysis.md
-└── .github/workflows/
-    ├── ci.yml  release.yml  deploy.yml
-    ├── terraform-pr.yml  terraform-apply.yml
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml  release.yml  deploy.yml
+│   │   └── terraform-pr.yml  terraform-apply.yml
+│   └── dependabot.yml          # github-actions, pip, npm, docker
+├── .trivyignore  .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
+└── README.md
 ```
 
 **Why two Terraform roots:** the `kubernetes`, `helm`, and `kubectl` providers cannot be reliably configured from a cluster created in the same apply. `cluster/` must be applied before `addons/`. The state keys are `modern/cluster/dev.tfstate` and `modern/addons/dev.tfstate`.
@@ -554,7 +560,7 @@ Both: instance categories c/m/r, generation > 5, `limits.cpu: 32`. Workloads sel
 2. `CREATE UNIQUE INDEX CONCURRENTLY uq_sla_alerts_shipment ON shiptrack.sla_alerts (shipment_id)`, inside an `autocommit_block()`.
 3. `ALTER TABLE … ADD CONSTRAINT … UNIQUE USING INDEX`.
 
-This is documented in `runbooks/wave-3-contract-migration.md` as the **point of no return** for legacy rollback.
+This is documented in `docs/runbooks/wave-3-contract-migration.md` as the **point of no return** for legacy rollback.
 
 ### 9.2 Waves
 
@@ -653,7 +659,7 @@ Each README contains hypothesis, blast radius, steps, expected signals, recovery
 |---|---|---|---|---|
 | GD-1 | Bad release | Deploy with `FAULT_READY_FAIL=true` | Rollout stalls; readiness gates keep new pods out of the TG; `--atomic` fails | Automatic Helm rollback; evidence: zero 5xx on tg-modern |
 | GD-2 | Canary regression | During Wave 2 at 25%: `FAULT_ERROR_RATE=0.05` | Platform `tg-modern-5xx-ratio` (SEV1) and/or fast-burn alarm | Break-glass weight → legacy 100; `helm rollback`; RCA using `request_id` traces |
-| GD-3 | Poison message | Send a malformed event body directly to SQS | `events-dlq-visible` alarm | Fix → `aws sqs start-message-move-task` redrive → verify applied (`runbooks/dlq-redrive.md`) |
+| GD-3 | Poison message | Send a malformed event body directly to SQS | `events-dlq-visible` alarm | Fix → `aws sqs start-message-move-task` redrive → verify applied (`docs/runbooks/dlq-redrive.md`) |
 | GD-4 | Node loss | Terminate one node (or Karpenter spot interruption via AWS FIS **[VERIFY FIS EKS actions]**) | Pod rescheduling; no SLO alarm | Self-healing; evidence: PDB + topology spread held availability; simulator ledger shows 0 lost events |
 
 Ledger verification (GD-3, GD-4, and the Wave 2 and Wave 3 evidence) runs through `evidence.yml` in `shiptrack-legacy` (`ShipTrack-Evidence` on a legacy host) while the legacy ASG exists, because runners cannot reach the private RDS instance. After the legacy ASG is scaled to 0, it runs as a one-shot Kubernetes Job launched by `deploy.yml` (platform §6.4).

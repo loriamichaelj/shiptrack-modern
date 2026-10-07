@@ -15,6 +15,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0009 | `rds-proxy` | Planned |
 | 0010 | `ui-serving-and-cloudfront` | Planned |
 | 0011 | `ledger-verification-after-legacy` | Planned |
+| 0012 | `aws-emulator-in-ci` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -147,3 +148,13 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** _to be written when decided_
 
 **Consequences:** _to be written when decided_
+
+## ADR-0012: aws-emulator-in-ci
+
+**Status:** Accepted
+
+**Context:** Same constraint as the legacy repo: LocalStack needs an auth token that fork PRs cannot read.
+
+**Decision:** LocalStack locally, a moto server in CI, with the endpoint taken from the environment (see the matching legacy ADR).
+
+**Consequences:** SQS, S3, Secrets Manager, and EventBridge paths are tested without secrets in CI. Features moto does not model (for example EventBridge archive replay) are covered by the game days instead.

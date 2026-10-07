@@ -13,7 +13,7 @@
 
 ## 0. Instructions for the implementing agent
 
-1. **Fork, don't rewrite.** The first commit imports `shiptrack-legacy` at tag `v1.0.0` **unmodified** (`src/`, `migrations/`, `tests/`, `web/`). Record the source repo, tag, and commit SHA in `docs/FORK.md`. Every later refactor commit references the remediation it implements (for example `REM-06: replace in-process queue with SQS`).
+1. **Fork, don't rewrite.** The first commit imports `shiptrack-legacy` at tag `v1.0.0` **unmodified** (`src/`, `migrations/`, `alembic.ini`, `tests/`, `web/`, `pyproject.toml`, and `requirements*`). Record the source repo, tag, and commit SHA in `docs/FORK.md`. Every later refactor commit references the remediation it implements (for example `REM-06: replace in-process queue with SQS`).
 2. **API contract is frozen.** The behavior in legacy design §3.4 must remain identical. The platform contract suite must pass against both stacks. The only allowed additions are `/healthz`, `/readyz`, the metrics server on port 9090, response headers `X-ShipTrack-Stack: modern`, `X-Request-Id`, and the REM-16 security headers, 503 `QUEUE_UNAVAILABLE` on the events endpoint, and the game-days-only `INJECTED_FAULT` 500 (§5.9). The contract suite recognizes both (legacy §3.4); `INJECTED_FAULT` is a failure outside game days. POD GET may return 302 → presigned URL. **The UI source in `web/` is frozen until Wave 2 completes**, because cutover gate G6 requires both stacks to serve an identical UI build.
 3. **Schema changes are expand/contract only** and must follow the ownership handoff in §9.1. Helm migrations stay **disabled** until handoff.
 4. **Never apply from a workstation.** Do not run `terraform apply`, `helm install/upgrade`, or `kubectl apply` against a real cluster. These run only inside GitHub Actions workflows with environment approval. OrbStack's local Kubernetes is fine for chart testing.
@@ -139,7 +139,7 @@ shiptrack-modern/
 │   ├── workflows/
 │   │   ├── ci.yml  release.yml  deploy.yml
 │   │   └── terraform-pr.yml  terraform-apply.yml
-│   └── dependabot.yml          # github-actions, pip, npm, docker
+│   └── dependabot.yml          # github-actions, uv, npm, docker
 ├── .trivyignore  .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
 └── README.md
 ```
@@ -151,7 +151,7 @@ shiptrack-modern/
 ## 5. Application refactor specification
 
 ### 5.1 Tooling changes
-- Move from `requirements.txt` to `pyproject.toml` + `uv.lock` (hash-locked).
+- Keep the forked `pyproject.toml` (tool config), declare dependencies in it, and replace `requirements*` with `uv.lock` (hash-locked).
 - Python stays 3.12.
 - Replace gunicorn with `uvicorn` (single process; one worker per pod — scaling is horizontal).
 - Add `structlog`, `prometheus-client`, and `aws-secretsmanager-caching` (or an equivalent small cache).
@@ -288,7 +288,8 @@ This is correct regardless of how many scanners run. The CronJob stays `suspend:
 | api | 10 | 6 | 60 |
 | worker-events | 10 | 2 | 20 |
 | sla-scan + migrate | 1 each | 2 | 4 |
-| **Total** | | | **208** |
+| legacy PodSync (2 hosts) + evidence scripts | — | 2 each | 6 |
+| **Total** | | | **214** |
 
   This must stay ≤ 60% of `db_max_connections` (≈ 240 of ≈ 400 on `db.t4g.medium`). Raising HPA/KEDA maxima or pool sizes means re-running this arithmetic; if the result exceeds the budget, record RDS Proxy as the decision in `docs/ADR.md`.
 - Add a unit test asserting that the pool settings × the HPA/KEDA max replica counts in `values-dev.yaml` stay within the configured budget.
@@ -339,7 +340,7 @@ CMD ["api"]
 - No `HEALTHCHECK` instruction (Kubernetes probes handle health).
 - Target image size < 200 MB.
 - `.dockerignore` excludes tests, `.git`, terraform, charts, and `web/node_modules`.
-- **Multi-arch:** `linux/amd64,linux/arm64`. Build each architecture natively in a matrix (`ubuntu-24.04` and `ubuntu-24.04-arm`; standard arm64 runners have been available to private repos since January 2026), push the per-arch digests, then merge them with `docker buildx imagetools create`. No QEMU. Before the merge, assert that `/app/web/dist/assets` has identical file names in both architecture images (§10.2), so the UI hashes cannot differ by architecture.
+- **Multi-arch:** `linux/amd64,linux/arm64`. Build each architecture natively in a matrix (`ubuntu-24.04` and `ubuntu-24.04-arm`; arm64 runners are free and generally available for public repositories), push the per-arch digests, then merge them with `docker buildx imagetools create`. No QEMU. Before the merge, assert that `/app/web/dist/assets` has identical file names in both architecture images (§10.2), so the UI hashes cannot differ by architecture.
 - **Tagging:** `sha-<full git sha>`. ECR tags are **IMMUTABLE**. Deployments reference the **digest**, never a tag.
 
 ---
@@ -527,7 +528,7 @@ Providers: `helm`, `kubernetes`, and `kubectl` (alekc/kubectl). `kubernetes_mani
 | Release / manifest | Notes |
 |---|---|
 | `aws-load-balancer-controller` (chart pinned) | `clusterName`, `vpcId`, `enableServiceMutatorWebhook=false`, Pod Identity SA |
-| `keda` (chart pinned) | Operator SA has a Pod Identity association to `shiptrack-modern-keda`. `TriggerAuthentication` uses `podIdentity.provider: aws` (operator credentials from the default SDK chain). Do not use `aws-eks` (IRSA-specific) or the deprecated `identityOwner` field |
+| `keda` (chart pinned) | Operator SA has a Pod Identity association to `shiptrack-modern-keda`. `TriggerAuthentication` uses `podIdentity.provider: aws` (operator credentials from the default SDK chain). Do not use `aws-eks` (deprecated, IRSA-specific). Leave `identityOwner` at its default (`keda`) so the operator's own Pod Identity credentials are used |
 | `karpenter` (Phase M9) | + `EC2NodeClass` (AL2023, discovery tag subnets/SG, IMDSv2 hop 1, gp3) and NodePools via `kubectl_manifest` |
 | `grafana` (chart pinned) | ClusterIP only (access via `kubectl port-forward`); AMP datasource with SigV4 via Pod Identity; dashboards from `observability/grafana` via ConfigMap provisioning |
 | Namespace `shiptrack` | Labels per §7.1 |
@@ -568,7 +569,7 @@ This is documented in `docs/runbooks/wave-3-contract-migration.md` as the **poin
 |---|---|---|---|---|
 | **0 — Dark launch** | Platform applied; modern cluster + add-ons + release deployed | Weights 0; contract `full` suite with `TARGET=modern`; k6 `baseline` with `TARGET=modern`; contract `ui_parity` check (gate G6) | Contract green; k6 thresholds met; all alarms/dashboards live; Inspector shows no fixable CRITICAL/HIGH | N/A (no traffic) |
 | **1 — Read path + UI** | Wave 0 exit, including G6 | Platform PR: `cutover.track` modern 10 → 50 → 100, 30-min soak each. Moves `/api/v1/track/*` and `/ui/*` together; the UI rule is sticky, so existing browser sessions stay on their stack | Platform gates G1–G4 per step; UI stack badge shows `modern` for new sessions | Platform PR or break-glass: `track.modern = 0` |
-| **2 — Write path** | Wave 1 at 100%; legacy **v1.1.0** deployed; `migrate_pod_to_s3.py` run on both hosts; PodSync cron installed; **G-POD:** `SELECT count(*) FROM shiptrack.pod_documents WHERE storage_uri LIKE 'file://%' AND uploaded_at < now() - interval '5 minutes'` = 0; legacy change freeze on | `cutover.default` modern 10 → 25 → 50 → 100, 30-min soak each | G1–G5; DLQ = 0; simulator ledger `verify` shows 0 lost events for modern-routed traffic; no `pod_not_migrated` event for a POD older than 5 minutes | Weight back to legacy. **Keep workers running** until the events queue drains; S3 PODs are readable by legacy v1.1 |
+| **2 — Write path** | Wave 1 at 100%; legacy **v1.1.0** deployed; `migrate_pod_to_s3.py` run on both hosts; PodSync cron installed; **G-POD:** `SELECT count(*) FROM shiptrack.pod_documents WHERE storage_uri LIKE 'file://%' AND uploaded_at < now() - interval '5 minutes'` = 0 (run through the allow-listed `pod-gate` evidence script, legacy §7.6); legacy change freeze on | `cutover.default` modern 10 → 25 → 50 → 100, 30-min soak each | G1–G5; DLQ = 0; simulator ledger `verify` shows 0 lost events for modern-routed traffic; no `pod_not_migrated` event for a POD older than 5 minutes | Weight back to legacy. **Keep workers running** until the events queue drains; S3 PODs are readable by legacy v1.1 |
 | **Handoff** | Wave 2 at 100% + 24 h soak | Flip schema ownership (§9.1) | Modern deploy with `migrations.enabled=true` is a no-op at head | Revert flags |
 | **3 — Scheduled jobs + decommission** | Handoff complete | 1) SSM: remove `/etc/cron.d/shiptrack-sla` and `shiptrack-podsync` from legacy hosts; 2) Helm: `slaScan.suspend=false`, enable heartbeat alarm; 3) verify exactly one alert per breach; 4) contract migration (§9.1); 5) legacy ASG → 0 (legacy PR); 6) after 7 days, destroy legacy stack and remove tg-legacy routing (platform PR) | Final cost snapshot captured | Before step 4: re-enable legacy cron, suspend CronJob. **After step 4: forward-fix only.** |
 
@@ -589,7 +590,7 @@ Store everything under `docs/migration/wave-N/`, scrubbed of account IDs, ARNs, 
 
 | Job | Steps |
 |---|---|
-| `test` | `uv sync --frozen`; ruff; mypy; pytest (Postgres 17 service); coverage ≥ 75% |
+| `test` | `uv sync --frozen`; ruff; mypy; pytest (Postgres 17 service + moto server for AWS APIs); coverage ≥ 75% |
 | `web` | `npm ci`; ESLint; `tsc --noEmit`; Vitest; `npm run build`; bundle < 200 KB gzipped; no inline `<script>`/`<style>` in `dist/index.html` |
 | `secrets` | gitleaks (full history on first run) |
 | `image` | buildx `linux/amd64` load; **Trivy image** `--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`; Trivy fs (Python and npm dependencies); CycloneDX SBOM artifact |
@@ -749,7 +750,7 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 | Phase | Deliverables | Done when |
 |---|---|---|
 | **M0 Fork** | Import legacy `v1.0.0`; `docs/FORK.md` | Diff vs legacy tag is empty for the imported paths |
-| **M1 App refactor** | REM-01, 02, 05, 06, 07, 08, 09 (scan logic), 15, 16 in code; UI static serving (§5.11); §5.9 fault injection; schema compat guard; tests incl. SQS, S3, Secrets Manager, and EventBridge via LocalStack | pytest green; contract suite green against a local `docker compose` on OrbStack (app + Postgres + LocalStack) |
+| **M1 App refactor** | REM-01, 02, 05, 06, 07, 08, 09 (scan logic), 15, 16 in code; UI static serving (§5.11); §5.9 fault injection; schema compat guard; tests incl. SQS, S3, Secrets Manager, and EventBridge via an AWS API emulator (LocalStack locally, a moto server in CI; the tests take the endpoint from the environment) | pytest green; contract suite green against a local `docker compose` on OrbStack (app + Postgres + LocalStack) |
 | **M2 Image** | Dockerfile (including the `web` stage), `.dockerignore` | Builds amd64 + arm64; runs as 10001; Trivy clean; `/ui/` renders from the running container |
 | **M3 Terraform cluster** | `terraform/cluster` | validate/tflint/checkov pass; every role has the boundary; SSM outputs defined |
 | **M4 Terraform addons** | `terraform/addons` (LBC, KEDA, Grafana, namespace, RBAC) | validate passes; CRs use `kubectl_manifest` |
@@ -767,12 +768,13 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 - [x] `terraform-aws-modules/eks` v21 requires AWS provider ≥ 6.0 (confirmed)
 - [x] EKS 1.36 in standard support; native `preStop` sleep GA since 1.34 (confirmed)
 - [x] `metrics-server` available as an EKS community add-on (confirmed)
-- [x] Native arm64 GitHub-hosted runners for private repos (confirmed, January 2026)
+- [x] Native arm64 GitHub-hosted runners for public repositories (generally available since August 2025)
 - [x] KEDA `podIdentity.provider: aws` (current KEDA docs)
 - [ ] Pod Identity with `automountServiceAccountToken: false`
 - [ ] AMP managed scraper Terraform resource and scrape-config schema
 - [ ] AWS FIS actions for EKS / spot interruption
 - [ ] Container Insights enhanced observability pricing model
-- [ ] EKS 1.36 standard-support end date
-- [ ] Node 24 LTS status and current React / Vite majors at build time
-- [ ] LocalStack edition and coverage for SQS, S3, Secrets Manager, EventBridge, and KMS
+- [x] EKS 1.36 standard support ends August 2, 2027; extended support ends August 2, 2028 (confirmed)
+- [x] Node 24 is Active LTS
+- [ ] Current React / Vite majors at build time
+- [ ] LocalStack account and auth token (the Community edition ended March 2026); coverage for SQS, S3, Secrets Manager, EventBridge, and KMS (local use only)

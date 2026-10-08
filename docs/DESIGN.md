@@ -395,7 +395,7 @@ CMD ["api"]
 | `shiptrack-sla-scan` | `shiptrack-modern-sla-scan` | app secret + KMS |
 | `shiptrack-migrate` | `shiptrack-modern-migrate` | migrator secret + KMS |
 
-All roles: prefix `shiptrack-modern-`, `permissions_boundary` = the platform boundary, and trust principal `pods.eks.amazonaws.com` with `sts:AssumeRole` + `sts:TagSession`.
+All roles: prefix `<PREFIX>-modern-`, `permissions_boundary` = the platform boundary, and trust principal `pods.eks.amazonaws.com` with `sts:AssumeRole` + `sts:TagSession`.
 
 ### 7.4 Ingress and network
 
@@ -445,9 +445,9 @@ All roles: prefix `shiptrack-modern-`, `permissions_boundary` = the platform bou
 | Principal | Access |
 |---|---|
 | `admin_role_arns` (humans) | `AmazonEKSClusterAdminPolicy` (cluster) |
-| `shiptrack-modern-apply` | Cluster admin (needed by `addons/`) |
-| `shiptrack-modern-plan` | `AmazonEKSViewPolicy` (cluster) |
-| `shiptrack-modern-deploy` | `kubernetes_groups = ["shiptrack-deployers"]`, bound to a namespace Role in `addons/` |
+| `<PREFIX>-modern-apply` | Cluster admin (needed by `addons/`) |
+| `<PREFIX>-modern-plan` | `AmazonEKSViewPolicy` (cluster) |
+| `<PREFIX>-modern-deploy` | `kubernetes_groups = ["shiptrack-deployers"]`, bound to a namespace Role in `addons/` |
 
 - Endpoint public + private, `public_access_cidrs = var.eks_public_cidrs` (default `["0.0.0.0/0"]` because GitHub-hosted runners have no stable IPs). **Risk M-R1.** The enterprise answer is a private-only endpoint + self-hosted runners in the VPC.
 - Secrets envelope encryption with its own CMK `alias/shiptrack-eks`.
@@ -494,9 +494,9 @@ The notifications queue policy allows `events.amazonaws.com` with `aws:SourceArn
 - **Archive** with 7-day retention, for replay during incident recovery
 
 **IAM roles:** as listed in §7.3, plus:
-- `shiptrack-modern-lbc` (official LBC policy JSON vendored at the chart's version)
+- `<PREFIX>-modern-lbc` (official LBC policy JSON vendored at the chart's version)
 - `shiptrack-modern-keda` (`sqs:GetQueueAttributes` on both queues)
-- `shiptrack-modern-cwagent` (`CloudWatchAgentServerPolicy`)
+- `<PREFIX>-modern-cwagent` (`CloudWatchAgentServerPolicy`)
 - `shiptrack-modern-grafana` (`aps:QueryMetrics`, `aps:GetLabels`, `aps:GetSeries`, `aps:GetMetricMetadata`)
 - Karpenter roles
 
@@ -600,7 +600,7 @@ Store everything under `docs/migration/wave-N/`, scrubbed of account IDs, ARNs, 
 All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyignore` with an `# expires: YYYY-MM-DD reason` comment per entry and are mirrored in the findings register.
 
 ### 10.2 `release.yml` (push to `dev`, after CI passes)
-1. OIDC → `shiptrack-modern-release` (trusts `ref:refs/heads/dev`; ECR push to `shiptrack/app` only).
+1. OIDC → `<PREFIX>-modern-release` (trusts `ref:refs/heads/dev`; ECR push to `shiptrack/app` only).
 2. buildx multi-arch → push the per-arch digests. Assert identical `/app/web/dist/assets` listings across architectures and, for the same `web/` tree, against the legacy release's listing; then merge into `sha-<sha>`.
 3. Trivy scan of the **pushed digest** (gate).
 4. Output the digest.
@@ -609,7 +609,7 @@ All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyi
 ### 10.3 `deploy.yml` (`workflow_run` on release success, or `workflow_dispatch` with a digest)
 - `environment: dev` (required reviewers); `concurrency: deploy-dev` (no cancel)
 - Steps:
-  1. OIDC → `shiptrack-modern-deploy`
+  1. OIDC → `<PREFIX>-modern-deploy`
   2. `aws eks update-kubeconfig`
   3. `scripts/render-values.sh`
   4. `helm upgrade --install shiptrack charts/shiptrack -n shiptrack -f values-dev.yaml -f generated-values.yaml --set image.digest=$DIGEST --atomic --wait --timeout 10m --history-max 10`

@@ -16,6 +16,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0010 | `ui-serving-and-cloudfront` | Planned |
 | 0011 | `ledger-verification-after-legacy` | Planned |
 | 0012 | `aws-emulator-in-ci` | Accepted |
+| 0013 | `eks-addon-version-pinning` | Accepted |
+| 0014 | `pod-restart-alarm-source` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -166,3 +168,23 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 **Decision:** LocalStack locally, a moto server in CI, with the endpoint taken from the environment (see the matching legacy ADR).
 
 **Consequences:** SQS, S3, Secrets Manager, and EventBridge paths are tested without secrets in CI. Features moto does not model (for example EventBridge archive replay) are covered by the game days instead.
+
+## ADR-0013: eks-addon-version-pinning
+
+**Status:** Accepted
+
+**Context:** The design pins the EKS managed add-on versions. Which versions exist for Kubernetes 1.36 can only be listed with `eks:DescribeAddonVersions`, and there are no AWS credentials on the workstation, so they cannot be looked up while writing the code.
+
+**Decision:** `terraform/cluster` takes an `addon_versions` map. An add-on that is not in the map resolves to the newest compatible version when it is first created. The `addon_versions` output prints what each one resolved to, and those values are copied into `terraform.tfvars` after the first apply. From then on every add-on is pinned.
+
+**Consequences:** The first apply is not reproducible by version, and the second plan shows no add-on drift only after the pins are committed. A later upgrade is a pull request that changes one value.
+
+## ADR-0014: pod-restart-alarm-source
+
+**Status:** Accepted
+
+**Context:** Design 8.1 alarms on the Container Insights metric `pod_number_of_container_restarts` for the `shiptrack` namespace. CloudWatch publishes that metric only with the dimensions PodName, Namespace, and ClusterName, so no alarm can cover the namespace, and an alarm cannot use `SEARCH`.
+
+**Decision:** A metric filter on the `performance` log group publishes the largest restart counter among pods in the namespace as `ShipTrack/Modern PodContainerRestarts`. The alarm watches its growth, `RATE(restarts) * 600`, and fires above 3 in ten minutes. The log groups are created by Terraform so the filters have something to attach to and so the groups get 14-day retention and the platform logs key.
+
+**Consequences:** Because the filter publishes a maximum, a restart in one pod can hide a smaller restart count in another during the same period. It is a cheap early warning, not a per-pod record; the per-pod series stay available in Container Insights.

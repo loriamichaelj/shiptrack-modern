@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import Callable, Iterator
@@ -9,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import boto3
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -46,16 +48,27 @@ def migrate(url: URL, revision: str = "head", *, downgrade: bool = False) -> Non
         engine.dispose()
 
 
-def settings_for(url: URL, pod_dir: Path) -> Settings:
-    return Settings(
-        db_host=url.host or "localhost",
-        db_port=url.port or 5432,
-        db_name=url.database or "",
-        db_user=url.username or "",
-        db_password=url.password or "",
-        db_sslmode="disable",
-        pod_dir=pod_dir,
+def create_db_secret(url: URL, name: str | None = None) -> str:
+    """Store the database's credentials in the emulated Secrets Manager; return the secret's ARN."""
+    client = boto3.client("secretsmanager", region_name="us-east-1")
+    secret = client.create_secret(
+        Name=name or f"shiptrack/test/db/{uuid.uuid4().hex[:8]}",
+        SecretString=json.dumps(
+            {
+                "username": url.username,
+                "password": url.password,
+                "host": url.host,
+                "port": url.port or 5432,
+                "dbname": url.database,
+                "engine": "postgres",
+            }
+        ),
     )
+    return str(secret["ARN"])
+
+
+def settings_for(url: URL, pod_dir: Path) -> Settings:
+    return Settings(db_secret_arn=create_db_secret(url), db_sslmode="disable", pod_dir=pod_dir)
 
 
 @pytest.fixture(scope="session")

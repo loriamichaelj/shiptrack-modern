@@ -2,17 +2,20 @@
 
 Connection resolution, in order:
 1. a connection passed in by the caller (`config.attributes["connection"]`), used by tests;
-2. the database from the INI config (`shiptrack.config.load_settings`), used on the hosts.
+2. the migrator credentials from Secrets Manager (`SHIPTRACK_DB_MIGRATOR_SECRET_ARN`), used by the
+   `migrate` command (REM-02: migrations run as `shiptrack_migrator`, the application as `shiptrack_app`).
 """
 
 from __future__ import annotations
 
 from alembic import context
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from shiptrack.config import load_settings
 from shiptrack.db.models import SCHEMA, Base
+from shiptrack.db.session import create_db_engine
+from shiptrack.secrets import SecretCache
 
 config = context.config
 target_metadata = Base.metadata
@@ -47,7 +50,14 @@ def run_migrations_online() -> None:
     if connection is not None:
         _run(connection)
         return
-    engine = create_engine(load_settings().database_url)
+    settings = load_settings()
+    engine = create_db_engine(
+        settings,
+        settings.require_migrator_secret(),
+        SecretCache(settings.aws_region),
+        pool_size=1,
+        max_overflow=1,
+    )
     try:
         with engine.connect() as conn:
             _run(conn)

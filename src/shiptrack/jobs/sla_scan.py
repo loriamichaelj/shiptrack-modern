@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import socket
 from collections.abc import Callable
@@ -15,11 +14,12 @@ from collections.abc import Callable
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from shiptrack.config import configure_logging, load_settings
+from shiptrack.config import load_settings
 from shiptrack.db.models import Shipment, SlaAlert
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.domain.models import format_utc
 from shiptrack.domain.status import Status
+from shiptrack.secrets import SecretCache
 
 logger = logging.getLogger("shiptrack.sla")
 
@@ -62,10 +62,15 @@ def run_scan(
 
 
 def main() -> None:
-    # Cron redirects stdout/stderr to sla.log, so log to the console only.
-    settings = dataclasses.replace(load_settings(), log_file=None)
-    configure_logging(settings)
-    engine = create_db_engine(settings)
+    settings = load_settings()
+    logging.basicConfig(level=settings.log_level)
+    engine = create_db_engine(
+        settings,
+        settings.require_db_secret(),
+        SecretCache(settings.aws_region),
+        pool_size=1,
+        max_overflow=1,
+    )
     try:
         count = run_scan(create_session_factory(engine), socket.gethostname())
         logger.info("sla scan finished breaches=%d", count)

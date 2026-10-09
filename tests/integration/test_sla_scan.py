@@ -10,6 +10,7 @@ from sqlalchemy import Engine, text
 from shiptrack.config import Settings
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.jobs.sla_scan import run_scan
+from shiptrack.secrets import SecretCache
 
 from .conftest import NOW
 
@@ -36,7 +37,9 @@ def test_overdue_shipments_are_flagged(
     delivered = make_shipment(promised=PAST)
     send_event(delivered["id"], "DELIVERED", NOW - timedelta(days=3))
 
-    factory = create_session_factory(create_db_engine(settings))
+    factory = create_session_factory(
+        create_db_engine(settings, settings.require_db_secret(), SecretCache())
+    )
     assert run_scan(factory, "host-a") == 1
 
     assert alerts(engine) == [(overdue["id"], "host-a")]
@@ -53,7 +56,9 @@ def test_a_flagged_shipment_is_not_alerted_again(
     settings: Settings, engine: Engine, make_shipment: MakeShipment
 ) -> None:
     make_shipment(promised=PAST)
-    factory = create_session_factory(create_db_engine(settings))
+    factory = create_session_factory(
+        create_db_engine(settings, settings.require_db_secret(), SecretCache())
+    )
     assert run_scan(factory, "host-a") == 1
     assert run_scan(factory, "host-a") == 0
     assert len(alerts(engine)) == 1
@@ -63,7 +68,9 @@ def test_breaches_are_logged(
     settings: Settings, make_shipment: MakeShipment, caplog: pytest.LogCaptureFixture
 ) -> None:
     shipment = make_shipment(promised=PAST)
-    factory = create_session_factory(create_db_engine(settings))
+    factory = create_session_factory(
+        create_db_engine(settings, settings.require_db_secret(), SecretCache())
+    )
     with caplog.at_level(logging.INFO, logger="shiptrack.sla"):
         run_scan(factory, "host-a")
     message = next(r.message for r in caplog.records if r.message.startswith("SLA_BREACH"))
@@ -77,7 +84,9 @@ def test_two_scanners_raise_duplicate_alerts(
 ) -> None:
     """AP-09: with cron on both hosts and no locking, the same breach is alerted twice."""
     shipment = make_shipment(promised=PAST)
-    factory = create_session_factory(create_db_engine(settings))
+    factory = create_session_factory(
+        create_db_engine(settings, settings.require_db_secret(), SecretCache())
+    )
     barrier = threading.Barrier(2, timeout=10)  # both scanners read before either writes
 
     results: dict[str, int] = {}

@@ -16,6 +16,9 @@ module "eks" {
   authentication_mode                      = "API"
   enable_cluster_creator_admin_permissions = false
 
+  # Pod Identity replaces IRSA, so no OIDC provider is created (the apply role may not create one).
+  enable_irsa = false
+
   endpoint_private_access      = true
   endpoint_public_access       = true
   endpoint_public_access_cidrs = var.eks_public_cidrs

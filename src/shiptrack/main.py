@@ -15,6 +15,7 @@ from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.events.publisher import EventPublisher
 from shiptrack.logconfig import configure_logging
 from shiptrack.secrets import SecretCache
+from shiptrack.storage.s3 import PodStore
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -31,6 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings = resolved
         app.state.session_factory = session_factory
         app.state.publisher = EventPublisher(resolved.require_events_queue(), resolved.aws_region)
+        app.state.pod_store = PodStore(resolved.require_pod_bucket(), resolved.aws_region)
         try:
             yield
         finally:

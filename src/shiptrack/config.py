@@ -34,8 +34,6 @@ class Settings(BaseSettings):
     notify_queue_url: str | None = None
     event_bus_name: str | None = None
     pod_bucket: str | None = None
-    # Removed with the local storage in REM-05.
-    pod_dir: Path = Path("/var/lib/shiptrack/pod")
     aws_region: str | None = Field(default=None, validation_alias="AWS_REGION")
 
     # Alembic revisions this build tolerates (design 9.1). /readyz fails when the database is at
@@ -82,6 +80,11 @@ class Settings(BaseSettings):
         if not self.events_queue_url:
             raise ConfigError("SHIPTRACK_EVENTS_QUEUE_URL is required")
         return self.events_queue_url
+
+    def require_pod_bucket(self) -> str:
+        if not self.pod_bucket:
+            raise ConfigError("SHIPTRACK_POD_BUCKET is required")
+        return self.pod_bucket
 
     def require_notify_queue(self) -> str:
         if not self.notify_queue_url:

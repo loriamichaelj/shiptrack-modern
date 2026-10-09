@@ -74,6 +74,7 @@ class AwsResources:
     events_queue_url: str
     notify_queue_url: str
     bus_name: str
+    pod_bucket: str
 
 
 def create_aws_resources() -> AwsResources:
@@ -103,15 +104,17 @@ def create_aws_resources() -> AwsResources:
         EventBusName=bus,
         Targets=[{"Id": "notifications", "Arn": notify_arn}],
     )
-    return AwsResources(events_queue, notify_queue, bus)
+    pod_bucket = f"shiptrack-pod-{suffix}"
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=pod_bucket)
+    return AwsResources(events_queue, notify_queue, bus, pod_bucket)
 
 
-def settings_for(url: URL, pod_dir: Path, aws: AwsResources | None = None) -> Settings:
+def settings_for(url: URL, aws: AwsResources | None = None) -> Settings:
     aws = aws or create_aws_resources()
     return Settings(
         db_secret_arn=create_db_secret(url),
         db_sslmode="disable",
-        pod_dir=pod_dir,
+        pod_bucket=aws.pod_bucket,
         events_queue_url=aws.events_queue_url,
         notify_queue_url=aws.notify_queue_url,
         event_bus_name=aws.bus_name,
@@ -170,8 +173,8 @@ def clean_tables(engine: Engine) -> None:
 
 
 @pytest.fixture()
-def settings(database_url: URL, tmp_path: Path) -> Settings:
-    return settings_for(database_url, tmp_path / "pod")
+def settings(database_url: URL) -> Settings:
+    return settings_for(database_url)
 
 
 @pytest.fixture()

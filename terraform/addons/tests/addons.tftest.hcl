@@ -25,7 +25,7 @@ override_data {
 override_data {
   target = data.aws_eks_cluster.this
   values = {
-    endpoint              = "https://cluster.example.test"
+    endpoint = "https://cluster.example.test"
     # A throwaway certificate with no key, only so the provider configuration parses.
     certificate_authority = [{ data = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUREekNDQWZlZ0F3SUJBZ0lVT2dZRXV6ai9JY0hoOHNjUGlNVzlIbXJKYlJZd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0Z6RVZNQk1HQTFVRUF3d01iMlptYkdsdVpTMTBaWE4wTUI0WERUSTJNVEF3T1RFNU16STFNVm9YRFRNMgpNVEF3TmpFNU16STFNVm93RnpFVk1CTUdBMVVFQXd3TWIyWm1iR2x1WlMxMFpYTjBNSUlCSWpBTkJna3Foa2lHCjl3MEJBUUVGQUFPQ0FROEFNSUlCQ2dLQ0FRRUE4MmhwS3JIWHFJdDl4S1V2TEwycWdXUlhiQkJNbTRFNnlvUTkKTHNCNnJzM1pYbzhQWCs2dkFVc2RyaVJrNU0xMG5FTldKRTdsdkZGYXk1YVAyUzcxS0VXWjE0WjQyQ0d6dkMxeApDbW1sdkpVRGFITDdLUTZIYnNldUtGV2RJR3ZNM0MwYUIwalZ2NkFLWDNCVS9BSHMydjVrVHJ6UFByQ003YzdPCkFtL3ZFK2xwaDJaeWtVenl1OTk1ZHdDd0trN2VzNDhRMGRMSXpndDIzOVhweTRYMzdZeGR2VDVwTG5yT21vMlcKMENHelJxMUMxRjBYQkMvclAvRVFkSUUyTXBST0J5OW1TZ2hsUlFibWxuZXc1N0tOU2F0alNnQjlRR3BSK1ZRegpkemlqWGQzNkI4ak1keG9Bd25jV3FnOGR3b3lUQUQ4bmE5M3huRXg1SWNuc2M1dlBNUUlEQVFBQm8xTXdVVEFkCkJnTlZIUTRFRmdRVXgzSm1ROHJ6cThwcGp3ckk3M3Ird2VseXV2VXdId1lEVlIwakJCZ3dGb0FVeDNKbVE4cnoKcThwcGp3ckk3M3Ird2VseXV2VXdEd1lEVlIwVEFRSC9CQVV3QXdFQi96QU5CZ2txaGtpRzl3MEJBUXNGQUFPQwpBUUVBVFJHTkNFOHN5Y29ya0t3TS9VMEQzUkQ4UTgrUVpQV0NWNEQ0NDZidVE3UWU2bFF5S2J3Rld5TGxianZUCjdtdFNWZHUyZVZSQ0x1SDFzYWVqWmF2aXhod3JYT0l2Q1JiS0tXT214VU51YVMveTFoaDFFMVYwRzVhSjlDQmoKQmhDU3dKT1hWQkhrL3BvKzJYdkxjSDVxeDBqK2JBTVNVeDR3Sk85aWhHT3RXMkhLMklLakdNT1VRZHNhd0pGbwp0YjFRMkNPajhCUVJzbVE4OGY5RFNTSDlTTkVFZHJLKzRxZGl6V3NFUFVPMFl1OEs5eFdlY3kzYjFEb216Nnk4CmxKaEhNYmJ0KzFjYXBXOXNuOW1RdGZzYUxwTXBsL21xc0VjdFJIdEZBMDhvK2hKWGFIaDZEVTBWN0lQNFlMVDQKUVNPclorelZQM1BRVFd6emp3V0NYeDg1dnc9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==" }]
   }
@@ -75,7 +75,7 @@ run "the_deployers_role_is_namespaced_and_bound_to_the_group" {
     condition = anytrue([
       for r in kubernetes_role_v1.deployer.rule :
       contains(r.api_groups, "elbv2.k8s.aws") && contains(r.resources, "targetgroupbindings")
-    ]) && anytrue([
+      ]) && anytrue([
       for r in kubernetes_role_v1.deployer.rule :
       contains(r.api_groups, "keda.sh") && contains(r.resources, "scaledobjects") && contains(r.resources, "triggerauthentications")
     ])

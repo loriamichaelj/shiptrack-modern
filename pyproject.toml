@@ -4,14 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shiptrack"
-version = "1.0.0"
-description = "ShipTrack shipment tracking API (legacy stack)"
-requires-python = ">=3.12"
-dynamic = ["dependencies"]
+version = "2.0.0"
+description = "ShipTrack shipment tracking API (modern stack)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.14",
+    "boto3>=1.35",
+    "fastapi>=0.115",
+    "prometheus-client>=0.21",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "sqlalchemy>=2.0",
+    "structlog>=24.4",
+    "uvicorn>=0.32",
+]
 
-[tool.setuptools.dynamic]
-# Exact, hash-pinned versions live in requirements.txt (pip-compile output).
-dependencies = { file = ["requirements.in"] }
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "moto[server,s3,sqs,secretsmanager,events]>=5.0",
+    "mypy>=1.13",
+    "pip-audit>=2.7",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

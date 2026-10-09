@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import URL, make_url
 
 from shiptrack.config import Settings
+from shiptrack.events.worker import EventWorker
 from shiptrack.main import create_app
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,8 +69,54 @@ def create_db_secret(url: URL, name: str | None = None) -> str:
     return str(secret["ARN"])
 
 
-def settings_for(url: URL, pod_dir: Path) -> Settings:
-    return Settings(db_secret_arn=create_db_secret(url), db_sslmode="disable", pod_dir=pod_dir)
+@dataclass(frozen=True)
+class AwsResources:
+    events_queue_url: str
+    notify_queue_url: str
+    bus_name: str
+
+
+def create_aws_resources() -> AwsResources:
+    """A fresh events queue, notifications queue, and event bus whose rule feeds the queue."""
+    sqs = boto3.client("sqs", region_name="us-east-1")
+    events = boto3.client("events", region_name="us-east-1")
+    suffix = uuid.uuid4().hex[:8]
+    events_queue = sqs.create_queue(QueueName=f"shiptrack-carrier-events-{suffix}")["QueueUrl"]
+    notify_queue = sqs.create_queue(QueueName=f"shiptrack-notifications-{suffix}")["QueueUrl"]
+    notify_arn = sqs.get_queue_attributes(QueueUrl=notify_queue, AttributeNames=["QueueArn"])[
+        "Attributes"
+    ]["QueueArn"]
+    bus = f"shiptrack-{suffix}"
+    events.create_event_bus(Name=bus)
+    events.put_rule(
+        Name="shiptrack-notify",
+        EventBusName=bus,
+        EventPattern=json.dumps(
+            {
+                "source": ["shiptrack.events"],
+                "detail-type": ["ShipmentDelivered", "ShipmentException"],
+            }
+        ),
+    )
+    events.put_targets(
+        Rule="shiptrack-notify",
+        EventBusName=bus,
+        Targets=[{"Id": "notifications", "Arn": notify_arn}],
+    )
+    return AwsResources(events_queue, notify_queue, bus)
+
+
+def settings_for(url: URL, pod_dir: Path, aws: AwsResources | None = None) -> Settings:
+    aws = aws or create_aws_resources()
+    return Settings(
+        db_secret_arn=create_db_secret(url),
+        db_sslmode="disable",
+        pod_dir=pod_dir,
+        events_queue_url=aws.events_queue_url,
+        notify_queue_url=aws.notify_queue_url,
+        event_bus_name=aws.bus_name,
+        aws_region="us-east-1",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -132,9 +180,24 @@ def client(settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 
+def event_worker(client: TestClient) -> EventWorker:
+    state = client.app.state  # type: ignore[attr-defined]
+    return EventWorker(
+        state.settings.events_queue_url,
+        state.session_factory,
+        bus_name=state.settings.event_bus_name,
+        region="us-east-1",
+        sleep=lambda _: None,
+    )
+
+
 def drain(client: TestClient) -> None:
-    """Wait until the in-process event queue is empty."""
-    assert client.app.state.processor.drain(timeout=10), "event queue did not drain"  # type: ignore[attr-defined]
+    """Apply every event waiting in the queue, as worker-events would."""
+    worker = event_worker(client)
+    for _ in range(100):
+        if worker.poll_once(0) == 0:
+            return
+    raise AssertionError("the events queue did not drain")
 
 
 NOW = datetime.now(UTC)

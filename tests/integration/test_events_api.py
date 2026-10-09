@@ -139,11 +139,11 @@ def test_invalid_transition_is_stored_but_not_applied(
 ) -> None:
     sid = make_shipment()["id"]
     send_event(sid, "IN_TRANSIT", T0)
-    with caplog.at_level(logging.WARNING, logger="shiptrack.events.processor"):
+    with caplog.at_level(logging.WARNING, logger="shiptrack.events"):
         send_event(sid, "PICKED_UP", T0 + H)  # backward move, later timestamp
     assert shipment_row(engine, sid).status == "IN_TRANSIT"
     assert [e.applied for e in event_rows(engine, sid)] == [True, False]
-    assert any("invalid transition" in record.message for record in caplog.records)
+    assert any("invalid_transition_ignored" in record.message for record in caplog.records)
 
 
 def test_nothing_changes_after_delivery(

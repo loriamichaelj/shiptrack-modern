@@ -78,6 +78,16 @@ class Settings(BaseSettings):
             raise ConfigError("SHIPTRACK_DB_SECRET_ARN is required")
         return self.db_secret_arn
 
+    def require_events_queue(self) -> str:
+        if not self.events_queue_url:
+            raise ConfigError("SHIPTRACK_EVENTS_QUEUE_URL is required")
+        return self.events_queue_url
+
+    def require_notify_queue(self) -> str:
+        if not self.notify_queue_url:
+            raise ConfigError("SHIPTRACK_NOTIFY_QUEUE_URL is required")
+        return self.notify_queue_url
+
     def require_migrator_secret(self) -> str:
         if not self.db_migrator_secret_arn:
             raise ConfigError("SHIPTRACK_DB_MIGRATOR_SECRET_ARN is required")

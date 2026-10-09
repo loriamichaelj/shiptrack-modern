@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,7 +12,8 @@ from shiptrack.api import events, health, pod, shipments, track
 from shiptrack.api.errors import register_exception_handlers
 from shiptrack.config import Settings, load_settings
 from shiptrack.db.session import create_db_engine, create_session_factory
-from shiptrack.events.processor import EventProcessor
+from shiptrack.events.publisher import EventPublisher
+from shiptrack.logconfig import configure_logging
 from shiptrack.secrets import SecretCache
 
 
@@ -23,21 +23,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved = settings or load_settings()
-        logging.basicConfig(level=resolved.log_level)
+        configure_logging(resolved.log_level)
         engine = create_db_engine(
             resolved, resolved.require_db_secret(), SecretCache(resolved.aws_region)
         )
         session_factory = create_session_factory(engine)
-        processor = EventProcessor(session_factory)
         app.state.settings = resolved
         app.state.session_factory = session_factory
-        app.state.processor = processor
-        processor.start()
+        app.state.publisher = EventPublisher(resolved.require_events_queue(), resolved.aws_region)
         try:
             yield
         finally:
-            # Queued events that have not been applied are dropped here (LEGACY AP-06).
-            processor.stop()
             engine.dispose()
 
     app = FastAPI(

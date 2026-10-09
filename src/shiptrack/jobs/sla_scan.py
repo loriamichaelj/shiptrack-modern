@@ -19,6 +19,7 @@ from shiptrack.db.models import Shipment, SlaAlert
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.domain.models import format_utc
 from shiptrack.domain.status import Status
+from shiptrack.logconfig import configure_logging
 from shiptrack.secrets import SecretCache
 
 logger = logging.getLogger("shiptrack.sla")
@@ -63,7 +64,7 @@ def run_scan(
 
 def main() -> None:
     settings = load_settings()
-    logging.basicConfig(level=settings.log_level)
+    configure_logging(settings.log_level)
     engine = create_db_engine(
         settings,
         settings.require_db_secret(),

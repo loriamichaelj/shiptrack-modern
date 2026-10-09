@@ -1,4 +1,5 @@
-import logging
+"""REM-09: one atomic statement, correct however many scanners run."""
+
 import threading
 from collections.abc import Callable
 from datetime import timedelta
@@ -6,6 +7,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import Engine, text
+from sqlalchemy.orm import Session, sessionmaker
 
 from shiptrack.config import Settings
 from shiptrack.db.session import create_db_engine, create_session_factory
@@ -29,87 +31,94 @@ def alerts(engine: Engine) -> list[Any]:
         )
 
 
-def test_overdue_shipments_are_flagged(
-    settings: Settings, engine: Engine, make_shipment: MakeShipment, send_event: SendEvent
+@pytest.fixture()
+def factory(settings: Settings) -> sessionmaker[Session]:
+    return create_session_factory(
+        create_db_engine(settings, settings.require_db_secret(), SecretCache(), pool_size=1)
+    )
+
+
+def test_overdue_shipments_are_flagged_and_alerted(
+    engine: Engine,
+    factory: sessionmaker[Session],
+    make_shipment: MakeShipment,
+    send_event: SendEvent,
 ) -> None:
     overdue = make_shipment(promised=PAST)
     make_shipment(promised=FUTURE)  # not due yet
     delivered = make_shipment(promised=PAST)
     send_event(delivered["id"], "DELIVERED", NOW - timedelta(days=3))
 
-    factory = create_session_factory(
-        create_db_engine(settings, settings.require_db_secret(), SecretCache())
-    )
-    assert run_scan(factory, "host-a") == 1
+    breaches = run_scan(factory, "pod-a")
 
-    assert alerts(engine) == [(overdue["id"], "host-a")]
+    assert [b.tracking_number for b in breaches] == [overdue["tracking_number"]]
+    assert alerts(engine) == [(overdue["id"], "pod-a")]
     with engine.connect() as connection:
-        row = connection.execute(
-            text("SELECT sla_breached, sla_breached_at FROM shiptrack.shipments WHERE id = :id"),
-            {"id": overdue["id"]},
-        ).one()
-    assert row.sla_breached is True
-    assert row.sla_breached_at is not None
+        flagged = connection.execute(
+            text(
+                "SELECT id::text FROM shiptrack.shipments "
+                "WHERE sla_breached AND sla_breached_at IS NOT NULL"
+            )
+        ).all()
+    assert [row[0] for row in flagged] == [overdue["id"]]
 
 
 def test_a_flagged_shipment_is_not_alerted_again(
-    settings: Settings, engine: Engine, make_shipment: MakeShipment
+    engine: Engine, factory: sessionmaker[Session], make_shipment: MakeShipment
 ) -> None:
     make_shipment(promised=PAST)
-    factory = create_session_factory(
-        create_db_engine(settings, settings.require_db_secret(), SecretCache())
-    )
-    assert run_scan(factory, "host-a") == 1
-    assert run_scan(factory, "host-a") == 0
+    assert len(run_scan(factory, "pod-a")) == 1
+    assert run_scan(factory, "pod-b") == []
     assert len(alerts(engine)) == 1
 
 
-def test_breaches_are_logged(
-    settings: Settings, make_shipment: MakeShipment, caplog: pytest.LogCaptureFixture
-) -> None:
-    shipment = make_shipment(promised=PAST)
-    factory = create_session_factory(
-        create_db_engine(settings, settings.require_db_secret(), SecretCache())
-    )
-    with caplog.at_level(logging.INFO, logger="shiptrack.sla"):
-        run_scan(factory, "host-a")
-    message = next(r.message for r in caplog.records if r.message.startswith("SLA_BREACH"))
-    assert f"tracking={shipment['tracking_number']}" in message
-    assert "host=host-a" in message
-    assert "promised=" in message
+def test_a_scan_with_nothing_to_do_reports_zero(factory: sessionmaker[Session]) -> None:
+    assert run_scan(factory, "pod-a") == []
 
 
-def test_two_scanners_raise_duplicate_alerts(
+def test_concurrent_scanners_raise_exactly_one_alert_per_breach(
     settings: Settings, engine: Engine, make_shipment: MakeShipment
 ) -> None:
-    """AP-09: with cron on both hosts and no locking, the same breach is alerted twice."""
-    shipment = make_shipment(promised=PAST)
-    factory = create_session_factory(
-        create_db_engine(settings, settings.require_db_secret(), SecretCache())
-    )
-    barrier = threading.Barrier(2, timeout=10)  # both scanners read before either writes
+    """The AP-09 evidence: with the legacy read-then-write, two scanners alerted twice."""
+    for _ in range(30):
+        make_shipment(promised=PAST)
+    scanners = 6
+    factories = [
+        create_session_factory(
+            create_db_engine(settings, settings.require_db_secret(), SecretCache(), pool_size=1)
+        )
+        for _ in range(scanners)
+    ]
+    start = threading.Barrier(scanners)
+    flagged: list[int] = []
+    errors: list[BaseException] = []
 
-    results: dict[str, int] = {}
+    def scan(index: int) -> None:
+        try:
+            start.wait(timeout=10)
+            flagged.append(len(run_scan(factories[index], f"pod-{index}")))
+        except BaseException as exc:
+            errors.append(exc)
 
-    def scan(host: str) -> None:
-        results[host] = run_scan(factory, host, between_read_and_write=barrier.wait)
-
-    threads = [threading.Thread(target=scan, args=(h,)) for h in ("host-a", "host-b")]
+    threads = [threading.Thread(target=scan, args=(i,)) for i in range(scanners)]
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=20)
+        thread.join(timeout=30)
 
-    assert results == {"host-a": 1, "host-b": 1}
+    assert not errors
+    assert sum(flagged) == 30
     rows = alerts(engine)
-    assert len(rows) == 2
-    assert {r[0] for r in rows} == {shipment["id"]}
-    assert {r[1] for r in rows} == {"host-a", "host-b"}
-    with engine.connect() as connection:
-        duplicates = connection.scalar(
-            text(
-                "SELECT count(*) FROM (SELECT shipment_id FROM shiptrack.sla_alerts "
-                "GROUP BY 1 HAVING count(*) > 1) d"
-            )
-        )
-    assert duplicates == 1
+    assert len(rows) == 30
+    assert len({shipment_id for shipment_id, _ in rows}) == 30
+
+
+def test_breaches_are_logged(
+    factory: sessionmaker[Session], make_shipment: MakeShipment, caplog: pytest.LogCaptureFixture
+) -> None:
+    shipment = make_shipment(promised=PAST)
+    with caplog.at_level("INFO", logger="shiptrack.sla"):
+        run_scan(factory, "pod-a")
+    text_ = "\n".join(record.message for record in caplog.records)
+    assert "sla_breach" in text_ and shipment["tracking_number"] in text_
+    assert "sla_scan_completed" in text_

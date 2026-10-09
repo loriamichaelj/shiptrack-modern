@@ -1,0 +1,255 @@
+name: ci
+
+# Every pull request runs these six jobs in parallel; all of them are required checks. None needs AWS
+# access, so they also run for pull requests from forks. Findings upload to code scanning for pull
+# requests from this repository only (forks get no token that may write there).
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.22"
+  TF_VERSION: "1.16.4"
+  TFLINT_VERSION: "v0.64.0"
+  TRIVY_VERSION: "v0.74.0"
+  CHECKOV_VERSION: "3.3.21"
+  GITLEAKS_VERSION: "8.30.1"
+  # sha256 of gitleaks_<version>_linux_x64.tar.gz, from the release's checksums file
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  KUBECONFORM_VERSION: "v0.8.0"
+  # sha256 of kubeconform-linux-amd64.tar.gz, from the release's CHECKSUMS file
+  KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Lint
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
+      - name: Type check
+        run: uv run --frozen mypy
+      # The tests start a moto server for SQS, S3, Secrets Manager, and EventBridge (ADR-0012), so
+      # they need no AWS credentials and no endpoint from the environment.
+      - name: Test with a 75% coverage gate
+        run: uv run --frozen pytest --cov=shiptrack --cov-fail-under=75 --cov-report=term-missing:skip-covered
+      # Audits what uv.lock pins, without the project itself (it is not on PyPI).
+      - name: Dependency audit
+        run: |
+          uv export --frozen --no-emit-project --format requirements-txt \
+            | uv run --frozen pip-audit --strict --progress-spinner off --no-deps --disable-pip -r /dev/stdin
+
+  web:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Dist checks (no inline script or style; bundle under 200 KB gzipped)
+        run: npm run check:dist
+
+  secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gitleaks.tar.gz" "$url"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/gitleaks-bin"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+          echo "$RUNNER_TEMP/gitleaks-bin" >>"$GITHUB_PATH"
+      - name: Scan the files
+        run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
+      - name: Scan the commits on the branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: gitleaks git . --config .gitleaks.toml --redact --no-banner --log-opts="${BASE}..${HEAD}"
+
+  image:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image (linux/amd64)
+        run: docker buildx build --platform linux/amd64 --load --tag shiptrack-modern:ci .
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+      # One report for code scanning, then the gate that fails the job.
+      - name: Trivy image (SARIF)
+        run: trivy image --quiet --severity CRITICAL,HIGH --ignore-unfixed --format sarif --output trivy-image.sarif shiptrack-modern:ci
+      - name: Trivy image (gate)
+        run: trivy image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 shiptrack-modern:ci
+      - name: Trivy filesystem (Python and npm dependencies, SARIF)
+        run: trivy fs --quiet --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --skip-dirs "**/.terraform" --format sarif --output trivy-fs.sarif .
+      - name: Trivy filesystem (gate)
+        run: trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --skip-dirs "**/.terraform" --exit-code 1 .
+      - name: SBOM (CycloneDX)
+        run: trivy image --quiet --format cyclonedx --output sbom.cdx.json shiptrack-modern:ci
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 30
+      - name: Upload image SARIF
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+      - name: Upload filesystem SARIF
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  iac:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Format
+        run: terraform fmt -check -recursive -diff terraform
+      - name: Validate each root
+        run: |
+          for root in terraform/cluster terraform/addons; do
+            echo "::group::$root"
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate
+            echo "::endgroup::"
+          done
+      - name: Test each root offline
+        run: |
+          for root in terraform/cluster terraform/addons; do
+            echo "::group::$root"
+            terraform -chdir="$root" test
+            echo "::endgroup::"
+          done
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+      # Skips live inline, next to the resource: #checkov:skip=CKV_...: <reason>
+      - name: Checkov
+        run: pipx run --spec "checkov==${CHECKOV_VERSION}" checkov --config-file .checkov.yaml -d terraform
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+      - name: Trivy config (SARIF)
+        run: trivy config --quiet --severity HIGH,CRITICAL --skip-dirs "**/.terraform" --format sarif --output trivy-config.sarif .
+      - name: Upload SARIF
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+      - name: Trivy config (gate)
+        run: trivy config --severity HIGH,CRITICAL --skip-dirs "**/.terraform" --exit-code 1 .
+
+  helm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint
+        run: |
+          helm lint charts/shiptrack -f charts/shiptrack/ci-values.yaml
+          helm lint charts/shiptrack -f charts/shiptrack/ci-values.yaml -f charts/shiptrack/values-dev.yaml --set migrations.enabled=true
+      - name: Install kubeconform
+        run: |
+          url="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/kubeconform.tar.gz" "$url"
+          echo "${KUBECONFORM_SHA256}  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/kubeconform-bin"
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP/kubeconform-bin" kubeconform
+          echo "$RUNNER_TEMP/kubeconform-bin" >>"$GITHUB_PATH"
+      # Both renders: the default one, and the one with the migration hook.
+      - name: Render and validate (strict, with the CRD schemas)
+        run: |
+          crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          mkdir rendered
+          helm template shiptrack charts/shiptrack -f charts/shiptrack/ci-values.yaml -f charts/shiptrack/values-dev.yaml >rendered/default.yaml
+          helm template shiptrack charts/shiptrack -f charts/shiptrack/ci-values.yaml --set migrations.enabled=true >rendered/migrations.yaml
+          for f in rendered/*.yaml; do
+            kubeconform -strict -summary -kubernetes-version 1.34.0 \
+              -schema-location default -schema-location "$crds" "$f"
+          done
+      # Skipped, with the reason:
+      #   CKV_K8S_21  the namespace is set by `helm -n shiptrack`, not in the templates
+      #   CKV_K8S_11  no CPU limits on purpose, to avoid CFS throttling (ADR-0003)
+      #   CKV_K8S_9   the workers and jobs serve no traffic, so they have liveness and no readiness probe
+      - name: Checkov on the rendered manifests
+        run: |
+          for f in rendered/*.yaml; do
+            pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f "$f" --framework kubernetes --compact --quiet \
+              --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9
+          done

@@ -1,0 +1,203 @@
+name: release
+
+# Builds the image for each architecture on a native runner (no QEMU), pushes the per-architecture
+# digests to ECR, checks that both images carry the same UI assets, merges them into one multi-arch
+# tag, and scans the pushed digest. The merged digest is what deploys; tags are only for people.
+# ECR tags are immutable, so a rerun for the same commit finds the tag and stops.
+#
+# Parity of the UI build with the legacy release is checked by the platform's ui_parity tests at
+# cutover (gate G6); here the check is that amd64 and arm64 agree, so a hash cannot differ by
+# architecture.
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "web/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "alembic.ini"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dev
+  cancel-in-progress: false
+
+env:
+  TRIVY_VERSION: "v0.74.0"
+  REPOSITORY: shiptrack/app
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Log in to ECR and name the repository
+        id: ecr
+        run: |
+          registry=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com
+          echo "::add-mask::$registry"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          echo "repo=$registry/$REPOSITORY" >>"$GITHUB_OUTPUT"
+      - name: Stop if this commit is already released
+        id: exists
+        env:
+          REPO: ${{ steps.ecr.outputs.repo }}
+        run: |
+          if docker buildx imagetools inspect "${REPO}:sha-${GITHUB_SHA}" >/dev/null 2>&1; then
+            echo "sha-${GITHUB_SHA} is already in ECR; nothing to build."
+            echo "released=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "released=false" >>"$GITHUB_OUTPUT"
+          fi
+      - name: Create a builder
+        if: steps.exists.outputs.released == 'false'
+        run: docker buildx create --name release --driver docker-container --use
+      - name: Build and push by digest
+        if: steps.exists.outputs.released == 'false'
+        env:
+          REPO: ${{ steps.ecr.outputs.repo }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          docker buildx build \
+            --platform "linux/${ARCH}" \
+            --provenance=false \
+            --build-arg "REVISION=${GITHUB_SHA}" \
+            --build-arg "CREATED=${created}" \
+            --build-arg "VERSION=sha-${GITHUB_SHA}" \
+            --output "type=image,name=${REPO},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file "$RUNNER_TEMP/build.json" \
+            .
+          digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/build.json")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest in the build metadata" >&2; exit 1; }
+          mkdir -p out
+          echo "$digest" >"out/digest-${ARCH}"
+      - name: List the UI assets in the pushed image
+        if: steps.exists.outputs.released == 'false'
+        env:
+          REPO: ${{ steps.ecr.outputs.repo }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          digest=$(cat "out/digest-${ARCH}")
+          docker pull --quiet "${REPO}@${digest}" >/dev/null
+          docker run --rm --entrypoint ls "${REPO}@${digest}" /app/web/dist/assets | sort >"out/assets-${ARCH}.txt"
+          cat "out/assets-${ARCH}.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.exists.outputs.released == 'false'
+        with:
+          name: build-${{ matrix.arch }}
+          path: out/
+          retention-days: 1
+
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        id: download
+        with:
+          pattern: build-*
+          path: builds
+          merge-multiple: false
+      - name: Log in to ECR and name the repository
+        id: ecr
+        run: |
+          registry=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com
+          echo "::add-mask::$registry"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          echo "repo=$registry/$REPOSITORY" >>"$GITHUB_OUTPUT"
+      - name: Check that both architectures carry the same UI
+        id: assets
+        run: |
+          if [[ ! -d builds ]]; then
+            echo "No build artifacts: the commit was already released."
+            echo "built=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! diff -u builds/build-amd64/assets-amd64.txt builds/build-arm64/assets-arm64.txt; then
+            echo "::error::the amd64 and arm64 images contain different UI assets"
+            exit 1
+          fi
+          echo "built=true" >>"$GITHUB_OUTPUT"
+      - name: Merge into one multi-arch tag
+        if: steps.assets.outputs.built == 'true'
+        env:
+          REPO: ${{ steps.ecr.outputs.repo }}
+        run: |
+          amd64=$(cat builds/build-amd64/digest-amd64)
+          arm64=$(cat builds/build-arm64/digest-arm64)
+          docker buildx imagetools create --tag "${REPO}:sha-${GITHUB_SHA}" "${REPO}@${amd64}" "${REPO}@${arm64}"
+      - name: Read the merged digest
+        id: publish
+        env:
+          REPO: ${{ steps.ecr.outputs.repo }}
+        run: |
+          digest=$(docker buildx imagetools inspect "${REPO}:sha-${GITHUB_SHA}" --format '{{.Manifest.Digest}}')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "could not read the digest of sha-${GITHUB_SHA}" >&2; exit 1; }
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          # deploy.yml has no ECR access, so it reads the digest from this artifact.
+          printf '%s\n' "$digest" >"$RUNNER_TEMP/digest.txt"
+          {
+            echo "### Image"
+            echo
+            echo "- tag: \`sha-${GITHUB_SHA}\`"
+            echo "- digest: \`$digest\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest
+          path: ${{ runner.temp }}/digest.txt
+          retention-days: 14
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+      # The gate runs on the digest that was pushed, not on a local build of the same source.
+      - name: Trivy scan of the pushed digest
+        env:
+          REPO: ${{ steps.ecr.outputs.repo }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          TRIVY_USERNAME=AWS TRIVY_PASSWORD=$(aws ecr get-login-password) \
+            trivy image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 "${REPO}@${DIGEST}"

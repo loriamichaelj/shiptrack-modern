@@ -1,0 +1,201 @@
+name: deploy
+
+# Installs the chart on the cluster with the image digest a release produced, smoke-tests through
+# the ALB, and rolls back if the smoke test fails. It never runs Terraform (terraform-apply.yml does)
+# and never builds anything. The `dev` environment requires a reviewer, so every deploy is approved.
+#
+# Runs after a successful release, or by hand with a digest (for a rollback to an older image).
+# A pre-upgrade migration hook is not undone by `--atomic` or `helm rollback`, so schema changes
+# must stay backward compatible (design 9.1).
+
+on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Image digest to deploy, sha256:<64 hex>. Empty: the latest release."
+        required: false
+        type: string
+      sha:
+        description: "Commit whose chart to deploy (default: the selected ref)"
+        required: false
+        type: string
+      platform_ref:
+        description: "Branch, tag, or commit of shiptrack-platform to take the contract suite from"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.12.22"
+  PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
+  RELEASE: shiptrack
+  NAMESPACE: shiptrack
+
+jobs:
+  deploy:
+    # A failed release deploys nothing.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - name: Name the commit
+        id: commit
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: echo "sha=${RUN_SHA:-${INPUT_SHA:-$GITHUB_SHA}}" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.commit.outputs.sha }}
+          persist-credentials: false
+
+      - name: Fetch the digest of the release
+        if: github.event_name == 'workflow_run' || inputs.digest == ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest
+          path: digest
+          run-id: ${{ github.event.workflow_run.id || '' }}
+          github-token: ${{ github.token }}
+
+      - name: Check the digest
+        id: digest
+        env:
+          INPUT_DIGEST: ${{ inputs.digest }}
+        run: |
+          digest=${INPUT_DIGEST:-}
+          if [[ -z "$digest" ]]; then digest=$(tr -d '[:space:]' <digest/digest.txt); fi
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "not an image digest" >&2; exit 1; }
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          echo "deploying $digest"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Connect to the cluster
+        run: |
+          cluster=$(aws ssm get-parameter --name /shiptrack/modern/cluster_name --query Parameter.Value --output text)
+          aws eks update-kubeconfig --name "$cluster" --alias shiptrack >/dev/null
+
+      - name: Render the values from the SSM contract
+        run: scripts/render-values.sh generated-values.yaml
+
+      - name: Note the current revision
+        id: before
+        run: |
+          prev=$(helm history "$RELEASE" -n "$NAMESPACE" -o json 2>/dev/null | jq -r 'last.revision // empty' || true)
+          echo "revision=${prev}" >>"$GITHUB_OUTPUT"
+          echo "current revision: ${prev:-none (first install)}"
+
+      - name: Upgrade
+        id: upgrade
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          started=$(date +%s)
+          helm upgrade --install "$RELEASE" charts/shiptrack -n "$NAMESPACE" \
+            -f charts/shiptrack/values-dev.yaml -f generated-values.yaml \
+            --set "image.digest=${DIGEST}" \
+            --atomic --wait --timeout 10m --history-max 10 >/dev/null
+          echo "seconds=$(( $(date +%s) - started ))" >>"$GITHUB_OUTPUT"
+          echo "revision=$(helm history "$RELEASE" -n "$NAMESPACE" -o json | jq -r 'last.revision')" >>"$GITHUB_OUTPUT"
+
+      - name: Wait for every Deployment to roll out
+        run: |
+          for deployment in $(kubectl -n "$NAMESPACE" get deployments -o name); do
+            kubectl -n "$NAMESPACE" rollout status "$deployment" --timeout=300s
+          done
+
+      - name: Pin the platform contract suite
+        id: pin
+        env:
+          REF: ${{ inputs.platform_ref || 'dev' }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            sha=$REF
+          else
+            sha=$(git ls-remote "https://github.com/$PLATFORM_REPO" "$REF" "refs/heads/$REF" "refs/tags/$REF" | awk 'NR==1 {print $1}')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve '$REF' in $PLATFORM_REPO" >&2; exit 1; }
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "using the contract suite from $PLATFORM_REPO at ${sha:0:12}"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: platform
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Smoke test through the ALB
+        id: smoke
+        run: |
+          base_url=$(aws ssm get-parameter --name /shiptrack/platform/base_url --query Parameter.Value --output text)
+          echo "::add-mask::$base_url"
+          secret_arn=$(aws ssm get-parameter --name /shiptrack/platform/test_token_secret_arn --query Parameter.Value --output text)
+          token=$(aws secretsmanager get-secret-value --secret-id "$secret_arn" --query SecretString --output text)
+          echo "::add-mask::$token"
+          export BASE_URL=$base_url TEST_TOKEN=$token
+          contract=""
+          if [[ -d platform/validation/contract ]]; then
+            contract=platform/validation/contract
+          else
+            echo "::warning::the platform has no validation/contract at this ref; only the built-in checks ran"
+          fi
+          scripts/smoke.sh $contract
+
+      - name: Roll back
+        if: failure() && steps.smoke.outcome == 'failure' && steps.before.outputs.revision != ''
+        env:
+          PREVIOUS: ${{ steps.before.outputs.revision }}
+        run: |
+          echo "::error::the smoke test failed; rolling back to revision ${PREVIOUS}"
+          helm rollback "$RELEASE" "$PREVIOUS" -n "$NAMESPACE" --wait --timeout 10m
+
+      - name: Record the deploy
+        if: success()
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          REVISION: ${{ steps.upgrade.outputs.revision }}
+          SECONDS_TAKEN: ${{ steps.upgrade.outputs.seconds }}
+          COMMIT: ${{ steps.commit.outputs.sha }}
+        run: |
+          committed=$(git show -s --format=%cI "$COMMIT")
+          finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "### Deployed"
+            echo
+            echo "- digest: \`${DIGEST}\`"
+            echo "- Helm revision: ${REVISION}"
+            echo "- upgrade took: ${SECONDS_TAKEN} s"
+            echo
+            echo "DORA row for docs/migration/dora.csv (commit time, deploy complete, upgrade seconds):"
+            echo
+            echo "\`${COMMIT},${committed},${finished},${SECONDS_TAKEN}\`"
+          } >>"$GITHUB_STEP_SUMMARY"

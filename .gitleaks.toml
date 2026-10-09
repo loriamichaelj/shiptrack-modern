@@ -1,0 +1,27 @@
+# Secret and identifier scan (design §6.12). Extends gitleaks' default rules with the identifiers
+# that must never appear in this public repository: AWS account IDs and ALB DNS names.
+title = "shiptrack scrub"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "aws-account-id"
+description = "A 12-digit number: possibly an AWS account ID. Use <ACCOUNT_ID> or a variable."
+regex = '''\b[0-9]{12}\b'''
+tags = ["identifier"]
+
+  [[rules.allowlists]]
+  description = "Obvious placeholders"
+  regexTarget = "match"
+  regexes = ['''^0{12}$''', '''^1{12}$''', '''^123456789012$''']
+
+[[rules]]
+id = "alb-dns-name"
+description = "An ALB DNS name. Use <ALB_DNS> or read it from the SSM contract."
+regex = '''[A-Za-z0-9-]+\.[a-z0-9-]+\.elb\.amazonaws\.com'''
+tags = ["identifier"]
+
+[allowlist]
+description = "Generated lock files carry hashes, not identifiers"
+paths = ['''\.terraform\.lock\.hcl$''', '''uv\.lock$''', '''package-lock\.json$''']

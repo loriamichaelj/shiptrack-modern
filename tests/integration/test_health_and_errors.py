@@ -23,9 +23,9 @@ def test_root_stays_green_while_the_database_is_unreachable(settings: Settings) 
         assert client.get("/").status_code == 200
         response = client.get("/api/v1/shipments")
     assert response.status_code == 500
-    assert response.json() == {
-        "error": {"code": "INTERNAL", "message": "Internal server error", "request_id": None}
-    }
+    error = response.json()["error"]
+    assert (error["code"], error["message"]) == ("INTERNAL", "Internal server error")
+    assert error["request_id"] == response.headers["x-request-id"]
 
 
 def test_unknown_route_uses_the_envelope(client: TestClient) -> None:

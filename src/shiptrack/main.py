@@ -5,25 +5,31 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 
-from shiptrack import __version__
+from shiptrack import __version__, metrics
 from shiptrack.api import events, health, pod, shipments, track
 from shiptrack.api.errors import register_exception_handlers
+from shiptrack.api.ui import mount_ui
 from shiptrack.config import Settings, load_settings
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.events.publisher import EventPublisher
 from shiptrack.logconfig import configure_logging
+from shiptrack.middleware import FaultInjectionMiddleware, RequestContextMiddleware
+from shiptrack.readiness import ReadinessProbe
 from shiptrack.secrets import SecretCache
 from shiptrack.storage.s3 import PodStore
 
+log = structlog.get_logger("shiptrack.app")
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the app. Settings are loaded at startup (not import) unless passed in."""
+    """Build the app. Settings come from the environment unless passed in."""
+    resolved = settings or load_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        resolved = settings or load_settings()
         configure_logging(resolved.log_level)
         engine = create_db_engine(
             resolved, resolved.require_db_secret(), SecretCache(resolved.aws_region)
@@ -33,6 +39,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.session_factory = session_factory
         app.state.publisher = EventPublisher(resolved.require_events_queue(), resolved.aws_region)
         app.state.pod_store = PodStore(resolved.require_pod_bucket(), resolved.aws_region)
+        app.state.readiness = ReadinessProbe(session_factory, resolved)
+        metrics.DB_POOL_CHECKED_OUT.set_function(lambda: float(engine.pool.checkedout()))  # type: ignore[attr-defined]
+        if resolved.fault_error_rate > 0:
+            log.warning("fault_injection_enabled", error_rate=resolved.fault_error_rate)
+        if resolved.fault_ready_fail:
+            log.warning("readiness_failure_forced")
         try:
             yield
         finally:
@@ -52,6 +64,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(events.router)
     app.include_router(track.router)
     app.include_router(pod.router)
+    mount_ui(app, resolved.web_dist)
+    # Added last runs first: the request context wraps the fault injector, so an injected 500 still
+    # carries the request id and the headers and is counted in the metrics.
+    app.add_middleware(FaultInjectionMiddleware, rate=resolved.fault_error_rate)
+    app.add_middleware(RequestContextMiddleware, settings=resolved)
     return app
 
 

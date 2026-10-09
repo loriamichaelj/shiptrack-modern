@@ -42,8 +42,8 @@ def mount_ui(app: FastAPI, web_dist: Path) -> bool:
     def shell() -> FileResponse:
         return FileResponse(index, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
-    app.add_api_route("/ui", shell, methods=["GET"], include_in_schema=False)
-    app.add_api_route("/ui/{path:path}", shell, methods=["GET"], include_in_schema=False)
+    app.add_api_route("/ui", shell, methods=["GET", "HEAD"], include_in_schema=False)
+    app.add_api_route("/ui/{path:path}", shell, methods=["GET", "HEAD"], include_in_schema=False)
     return True
 
 

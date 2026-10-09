@@ -70,6 +70,11 @@ def test_the_shell_is_served_uncached(ui_client: TestClient) -> None:
         assert response.headers["content-type"].startswith("text/html")
 
 
+def test_head_requests_work_on_the_ui(ui_client: TestClient) -> None:
+    for path in ("/ui/", "/ui/assets/app-abc123.js"):
+        assert ui_client.head(path).status_code == 200, path
+
+
 def test_hashed_assets_are_immutable(ui_client: TestClient) -> None:
     response = ui_client.get("/ui/assets/app-abc123.js")
     assert response.status_code == 200

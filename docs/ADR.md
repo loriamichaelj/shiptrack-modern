@@ -6,11 +6,11 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 |---|---|---|
 | 0001 | `fork-strategy` | Accepted |
 | 0002 | `db-connection-budget` | Accepted |
-| 0003 | `no-cpu-limits` | Planned |
+| 0003 | `no-cpu-limits` | Accepted |
 | 0004 | `pod-identity-token-automount` | Planned |
 | 0005 | `podsync-window-acceptance` | Planned |
 | 0006 | `transactional-outbox` | Planned |
-| 0007 | `sqs-encryption` | Planned |
+| 0007 | `sqs-encryption` | Accepted |
 | 0008 | `security-groups-for-pods` | Planned |
 | 0009 | `rds-proxy` | Planned |
 | 0010 | `ui-serving-and-cloudfront` | Planned |
@@ -53,15 +53,15 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 ## ADR-0003: no-cpu-limits
 
-**Status:** Planned
+**Status:** Accepted
 
 **Records:** Requests only, to avoid CFS throttling (design §7.2).
 
-**Context:** _to be written when decided_
+**Context:** A CPU limit makes the kernel throttle a container that has bursts above it, even when the node has idle CPU. The API and workers are bursty and latency-sensitive, and the HPA scales on CPU use measured against the request.
 
-**Decision:** _to be written when decided_
+**Decision:** Every container sets a CPU request and a memory limit, and no CPU limit. Requests drive scheduling and the HPA (60% of the request). Memory has a limit because memory is not compressible: a pod that leaks is killed instead of taking the node down with it.
 
-**Consequences:** _to be written when decided_
+**Consequences:** A busy pod can use idle CPU on its node, and a noisy neighbour is bounded only by requests and the scheduler. Checkov rule CKV_K8S_11 ("CPU limits should be set") is skipped for the rendered chart in `ci.yml` for this reason, and `tests/unit/test_chart.py` fails if a CPU limit appears.
 
 ## ADR-0004: pod-identity-token-automount
 
@@ -69,11 +69,11 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 **Records:** Result of the [VERIFY] on automountServiceAccountToken: false; written either way.
 
-**Context:** _to be written when decided_
+**Context:** Design 7.2 turns off the default service account token for every pod. EKS Pod Identity adds its own projected token volume (audience `pods.eks.amazonaws.com`) and credential environment variables through a mutating webhook, so the default token should not be needed. The documentation does not say outright that the webhook still acts when `automountServiceAccountToken` is false, and there is no cluster yet to test it on.
 
-**Decision:** _to be written when decided_
+**Decision:** Provisional: the chart sets `automountServiceAccountToken: false` on the service accounts and pod specs, controlled by `serviceAccount.automountToken` in `values.yaml`. The first deploy decides it. If a pod has no `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` or cannot get credentials, set the value to `true`, deploy, and change this entry to say so.
 
-**Consequences:** _to be written when decided_
+**Consequences:** Until the first deploy is observed this entry stays Planned. If the token is needed, every pod carries the default token, which gives it a Kubernetes API credential it never uses; the namespace has no Role that grants anything to those service accounts.
 
 ## ADR-0005: podsync-window-acceptance
 
@@ -101,15 +101,15 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 ## ADR-0007: sqs-encryption
 
-**Status:** Planned
+**Status:** Accepted
 
 **Records:** SSE-SQS vs a CMK (O-M8).
 
-**Context:** _to be written when decided_
+**Context:** Queues can be encrypted with SSE-SQS, which costs nothing, or with a customer managed KMS key, which adds a KMS request charge per API call and a key policy to maintain. The queues carry shipment events and notifications, not secrets.
 
-**Decision:** _to be written when decided_
+**Decision:** Both queues and both dead-letter queues use SSE-SQS (`sqs_managed_sse_enabled`). Checkov rule CKV_AWS_27 is skipped inline on each queue with a pointer to this entry. The notifications queue policy allows `events.amazonaws.com` only for the `shiptrack-notify` rule's ARN.
 
-**Consequences:** _to be written when decided_
+**Consequences:** Messages are encrypted at rest with no extra cost (optimization O-M8). Key use is not logged per request, and access cannot be revoked by disabling a key. Moving to a CMK means adding `kms_master_key_id`, granting the worker and API roles `kms:Decrypt` and `kms:GenerateDataKey` through `sqs`, and letting `events.amazonaws.com` use the key for the notifications queue.
 
 ## ADR-0008: security-groups-for-pods
 

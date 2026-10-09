@@ -100,7 +100,7 @@ shiptrack-modern/
 ├── tests/{unit,integration}/
 ├── pyproject.toml  uv.lock
 ├── Dockerfile  .dockerignore
-├── compose.yaml                # Local only: app + Postgres + LocalStack
+├── compose.yaml                # Local only: app + Postgres + an AWS emulator (LocalStack)
 ├── charts/shiptrack/
 │   ├── Chart.yaml  values.yaml  values-dev.yaml  values.schema.json  ci-values.yaml
 │   └── templates/
@@ -108,7 +108,7 @@ shiptrack-modern/
 │       ├── serviceaccounts.yaml
 │       ├── deployment-api.yaml  service-api.yaml  hpa-api.yaml  pdb-api.yaml
 │       ├── targetgroupbinding.yaml
-│       ├── deployment-worker-events.yaml  scaledobject-worker-events.yaml
+│       ├── deployment-worker-events.yaml  scaledobject-worker-events.yaml  pdb-worker-events.yaml
 │       ├── deployment-worker-notify.yaml  scaledobject-worker-notify.yaml
 │       ├── triggerauthentication.yaml
 │       ├── cronjob-sla-scan.yaml
@@ -116,10 +116,12 @@ shiptrack-modern/
 │       └── networkpolicies.yaml
 ├── terraform/
 │   ├── cluster/                # EKS, nodes, ECR, SQS, EventBridge, IAM, Pod Identity, AMP, alarms, SSM outputs
-│   └── addons/                 # Helm releases + cluster-scoped manifests (needs a live cluster)
+│   ├── addons/                 # Helm releases + cluster-scoped manifests (needs a live cluster)
+│   └── modules/pod-role/       # One IAM role + Pod Identity association per service account
 ├── scripts/
 │   ├── render-values.sh        # SSM → generated Helm values
-│   └── smoke.sh
+│   ├── smoke.sh
+│   └── local-init.sh           # Creates the queues, bus, bucket, and secrets in the compose emulator
 ├── observability/
 │   ├── grafana/*.json
 │   └── cloudwatch/*.json
@@ -139,8 +141,9 @@ shiptrack-modern/
 │   ├── workflows/
 │   │   ├── ci.yml  release.yml  deploy.yml
 │   │   └── terraform-pr.yml  terraform-apply.yml
-│   └── dependabot.yml          # github-actions, uv, npm, docker
-├── .trivyignore  .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
+│   ├── scripts/terraform-ci.sh # plan/apply wrapper that masks identifiers
+│   └── dependabot.yml          # github-actions, uv, npm, docker, terraform
+├── .trivyignore (when a finding is accepted)  .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
 └── README.md
 ```
 
@@ -389,11 +392,11 @@ CMD ["api"]
 
 | ServiceAccount | IAM role (Pod Identity) | Policy (resource-scoped) |
 |---|---|---|
-| `shiptrack-api` | `shiptrack-modern-api` | `sqs:SendMessage` on events queue; `s3:PutObject`/`GetObject` on `pod/*`; `secretsmanager:GetSecretValue` on the app secret; `kms:Decrypt`/`GenerateDataKey` via `s3`/`secretsmanager` |
-| `shiptrack-worker-events` | `shiptrack-modern-worker-events` | `sqs:ReceiveMessage`/`DeleteMessage`/`ChangeMessageVisibility`/`GetQueueAttributes` on events queue; `events:PutEvents` on the bus; app secret + KMS via secretsmanager |
-| `shiptrack-worker-notify` | `shiptrack-modern-worker-notify` | SQS consume on notifications queue |
-| `shiptrack-sla-scan` | `shiptrack-modern-sla-scan` | app secret + KMS |
-| `shiptrack-migrate` | `shiptrack-modern-migrate` | migrator secret + KMS |
+| `shiptrack-api` | `<PREFIX>-modern-api` | `sqs:SendMessage` on events queue; `s3:PutObject`/`GetObject` on `pod/*`; `secretsmanager:GetSecretValue` on the app secret; `kms:Decrypt`/`GenerateDataKey` via `s3`/`secretsmanager` |
+| `shiptrack-worker-events` | `<PREFIX>-modern-worker-events` | `sqs:ReceiveMessage`/`DeleteMessage`/`ChangeMessageVisibility`/`GetQueueAttributes` on events queue; `events:PutEvents` on the bus; app secret + KMS via secretsmanager |
+| `shiptrack-worker-notify` | `<PREFIX>-modern-worker-notify` | SQS consume on notifications queue |
+| `shiptrack-sla-scan` | `<PREFIX>-modern-sla-scan` | app secret + KMS |
+| `shiptrack-migrate` | `<PREFIX>-modern-migrate` | migrator secret + KMS |
 
 All roles: prefix `<PREFIX>-modern-`, `permissions_boundary` = the platform boundary, and trust principal `pods.eks.amazonaws.com` with `sts:AssumeRole` + `sts:TagSession`.
 
@@ -436,7 +439,7 @@ All roles: prefix `<PREFIX>-modern-`, `permissions_boundary` = the platform boun
 **Inputs:** platform SSM contract (data sources) and variables (`kubernetes_version`, `admin_role_arns`, `github_org`).
 
 **EKS**
-- Module `terraform-aws-modules/eks/aws` `~> 21.0` (requires AWS provider ≥ 6.0). v21 notes for the implementer: input variables dropped the `cluster_` prefix (for example `name`, `kubernetes_version`); built-in IRSA was removed in favor of Pod Identity; node IMDS hop limit defaults to 1; EKS `deletion_protection` is supported and must be set `true`. Use the same major for the `//modules/karpenter` submodule.
+- Module `terraform-aws-modules/eks/aws` `~> 21.0` (requires AWS provider ≥ 6.0). v21 notes for the implementer: input variables dropped the `cluster_` prefix (for example `name`, `kubernetes_version`); the module still creates an IRSA OIDC provider unless `enable_irsa = false`, which this stack sets because Pod Identity replaces IRSA and the apply role may not create one; node IMDS hop limit defaults to 1; EKS `deletion_protection` is supported and must be set `true`. Use the same major for the `//modules/karpenter` submodule.
 - Name `shiptrack`
 - `kubernetes_version = "1.36"` (pinned; the newest version in EKS standard support as of October 2026, with standard support through roughly August 2027 **[VERIFY end date]**). Falling into extended support raises the control-plane price about 6× (≈ $0.60 vs $0.10 per cluster-hour) — a cost gotcha.
 - `authentication_mode = "API"` (access entries; the `aws-auth` ConfigMap is not used)
@@ -495,9 +498,9 @@ The notifications queue policy allows `events.amazonaws.com` with `aws:SourceArn
 
 **IAM roles:** as listed in §7.3, plus:
 - `<PREFIX>-modern-lbc` (official LBC policy JSON vendored at the chart's version)
-- `shiptrack-modern-keda` (`sqs:GetQueueAttributes` on both queues)
+- `<PREFIX>-modern-keda` (`sqs:GetQueueAttributes` on both queues)
 - `<PREFIX>-modern-cwagent` (`CloudWatchAgentServerPolicy`)
-- `shiptrack-modern-grafana` (`aps:QueryMetrics`, `aps:GetLabels`, `aps:GetSeries`, `aps:GetMetricMetadata`)
+- `<PREFIX>-modern-grafana` (`aps:QueryMetrics`, `aps:GetLabels`, `aps:GetSeries`, `aps:GetMetricMetadata`)
 - Karpenter roles
 
 All use Pod Identity associations in namespace `shiptrack` or the add-on's namespace, and all carry the boundary.
@@ -514,7 +517,7 @@ All use Pod Identity associations in namespace `shiptrack` or the add-on's names
 | events-queue-age-critical | `> 600 s` 5 min | SEV1 |
 | events-dlq-visible | `ApproximateNumberOfMessagesVisible > 0` | SEV2 |
 | notify-dlq-visible | same | SEV2 |
-| pod-restarts | Container Insights `pod_number_of_container_restarts` > 3 in 10 min (namespace `shiptrack`) | SEV2 |
+| pod-restarts | Growth of the largest `pod_number_of_container_restarts` in namespace `shiptrack` above 3 in 10 min, from a metric filter on the Container Insights `performance` log group (ADR-0014) | SEV2 |
 | sla-scan-heartbeat | Log metric filter `{ $.event = "sla_scan_completed" }`, sum < 1 over 15 min, `treat_missing_data = breaching` — **created disabled** (`actions_enabled = false`) until Wave 3 | SEV2 |
 | slo-availability-fast-burn | §11.1 | SEV1 |
 | slo-availability-slow-burn | §11.1 | SEV2 |
@@ -523,12 +526,12 @@ All use Pod Identity associations in namespace `shiptrack` or the add-on's names
 
 ### 8.2 `terraform/addons`
 
-Providers: `helm`, `kubernetes`, and `kubectl` (alekc/kubectl). `kubernetes_manifest` requires CRDs at plan time, which breaks first-time applies — this is why `kubectl` is used for CRs.
+Providers: `helm` and `kubernetes`. Custom resources, once this root has any (the Karpenter NodePools in M9), use `kubectl_manifest` from the `kubectl` provider (alekc/kubectl), because `kubernetes_manifest` requires CRDs at plan time, which breaks first-time applies. Until then this root declares no `kubectl` provider; the chart owns the TargetGroupBinding, ScaledObjects, and TriggerAuthentication.
 
 | Release / manifest | Notes |
 |---|---|
 | `aws-load-balancer-controller` (chart pinned) | `clusterName`, `vpcId`, `enableServiceMutatorWebhook=false`, Pod Identity SA |
-| `keda` (chart pinned) | Operator SA has a Pod Identity association to `shiptrack-modern-keda`. `TriggerAuthentication` uses `podIdentity.provider: aws` (operator credentials from the default SDK chain). Do not use `aws-eks` (deprecated, IRSA-specific). Leave `identityOwner` at its default (`keda`) so the operator's own Pod Identity credentials are used |
+| `keda` (chart pinned) | Operator SA has a Pod Identity association to `<PREFIX>-modern-keda`. `TriggerAuthentication` uses `podIdentity.provider: aws` (operator credentials from the default SDK chain). Do not use `aws-eks` (deprecated, IRSA-specific). Leave `identityOwner` at its default (`keda`) so the operator's own Pod Identity credentials are used |
 | `karpenter` (Phase M9) | + `EC2NodeClass` (AL2023, discovery tag subnets/SG, IMDSv2 hop 1, gp3) and NodePools via `kubectl_manifest` |
 | `grafana` (chart pinned) | ClusterIP only (access via `kubectl port-forward`); AMP datasource with SigV4 via Pod Identity; dashboards from `observability/grafana` via ConfigMap provisioning |
 | Namespace `shiptrack` | Labels per §7.1 |
@@ -753,7 +756,7 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 | **M1 App refactor** | REM-01, 02, 05, 06, 07, 08, 09 (scan logic), 15, 16 in code; UI static serving (§5.11); §5.9 fault injection; schema compat guard; tests incl. SQS, S3, Secrets Manager, and EventBridge via an AWS API emulator (LocalStack locally, a moto server in CI; the tests take the endpoint from the environment) | pytest green; contract suite green against a local `docker compose` on OrbStack (app + Postgres + LocalStack) |
 | **M2 Image** | Dockerfile (including the `web` stage), `.dockerignore` | Builds amd64 + arm64; runs as 10001; Trivy clean; `/ui/` renders from the running container |
 | **M3 Terraform cluster** | `terraform/cluster` | validate/tflint/checkov pass; every role has the boundary; SSM outputs defined |
-| **M4 Terraform addons** | `terraform/addons` (LBC, KEDA, Grafana, namespace, RBAC) | validate passes; CRs use `kubectl_manifest` |
+| **M4 Terraform addons** | `terraform/addons` (LBC, KEDA, Grafana, namespace, RBAC) | validate passes; any CR uses `kubectl_manifest` |
 | **M5 Helm chart** | All templates, schema, values | `helm lint` + kubeconform pass; install on OrbStack's local Kubernetes with stub values succeeds (TGB/KEDA CRDs installed there) |
 | **M6 CI/CD** | `ci.yml`, `release.yml`, `deploy.yml`, Terraform workflows | `actionlint` passes; all actions SHA-pinned |
 | **M7 Observability** | Alarms, SLO doc, dashboards, Log Insights queries | Every alarm has owner/sev/runbook |
@@ -771,7 +774,7 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 - [x] Native arm64 GitHub-hosted runners for public repositories (generally available since August 2025)
 - [x] KEDA `podIdentity.provider: aws` (current KEDA docs)
 - [ ] Pod Identity with `automountServiceAccountToken: false`
-- [ ] AMP managed scraper Terraform resource and scrape-config schema
+- [x] AMP managed scraper Terraform resource and scrape-config schema (only `kubernetes_sd_config`, a scrape interval of 30 s or more; in `API` authentication mode the service creates the scraper's access entry itself)
 - [ ] AWS FIS actions for EKS / spot interruption
 - [ ] Container Insights enhanced observability pricing model
 - [x] EKS 1.36 standard support ends August 2, 2027; extended support ends August 2, 2028 (confirmed)

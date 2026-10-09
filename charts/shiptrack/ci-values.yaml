@@ -1,0 +1,23 @@
+# Stub values for helm lint, kubeconform, and installs on a local cluster. They are placeholders:
+# no real account, queue, or target group appears here.
+image:
+  repository: registry.example.test/shiptrack/app
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+vpcCidr: 10.0.0.0/16
+baseUrl: http://shiptrack.example.test
+
+alb:
+  targetGroupArn: arn:aws:elasticloadbalancing:us-east-1:<ACCOUNT_ID>:targetgroup/shiptrack-tg-modern/0123456789abcdef
+  securityGroupId: sg-0123456789abcdef0
+
+aws:
+  eventsQueueUrl: https://sqs.us-east-1.amazonaws.com/<ACCOUNT_ID>/shiptrack-carrier-events
+  notifyQueueUrl: https://sqs.us-east-1.amazonaws.com/<ACCOUNT_ID>/shiptrack-notifications
+  eventBusName: shiptrack
+  podBucket: shiptrack-pod-example
+  dbSecretArn: arn:aws:secretsmanager:us-east-1:<ACCOUNT_ID>:secret:shiptrack/dev/db/app-AbCdEf
+  dbMigratorSecretArn: arn:aws:secretsmanager:us-east-1:<ACCOUNT_ID>:secret:shiptrack/dev/db/migrator-AbCdEf
+
+migrations:
+  enabled: true

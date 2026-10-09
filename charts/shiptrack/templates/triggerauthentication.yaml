@@ -1,0 +1,10 @@
+{{- /* The KEDA operator's own Pod Identity credentials (the default identity owner) read the queues. */ -}}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: shiptrack-aws
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "autoscaling") | nindent 4 }}
+spec:
+  podIdentity:
+    provider: aws

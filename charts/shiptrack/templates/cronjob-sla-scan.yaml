@@ -1,0 +1,45 @@
+{{- $ctx := dict "root" . "component" "sla-scan" -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shiptrack-sla-scan
+  labels:
+    {{- include "shiptrack.labels" $ctx | nindent 4 }}
+spec:
+  schedule: {{ .Values.slaScan.schedule | quote }}
+  suspend: {{ .Values.slaScan.suspend }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "shiptrack.labels" $ctx | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: shiptrack-sla-scan
+          automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+          securityContext:
+            {{- include "shiptrack.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: sla-scan
+              image: {{ include "shiptrack.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["sla-scan"]
+              env:
+                {{- include "shiptrack.commonEnv" . | nindent 16 }}
+                {{- include "shiptrack.dbEnv" (dict "root" . "pool" .Values.slaScan.pool) | nindent 16 }}
+              resources:
+                {{- toYaml .Values.slaScan.resources | nindent 16 }}
+              securityContext:
+                {{- include "shiptrack.containerSecurityContext" . | nindent 16 }}
+              volumeMounts:
+                {{- include "shiptrack.tmpMount" . | nindent 16 }}
+          volumes:
+            {{- include "shiptrack.tmpVolume" . | nindent 12 }}

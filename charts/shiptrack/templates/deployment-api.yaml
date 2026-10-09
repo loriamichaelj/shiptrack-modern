@@ -1,0 +1,85 @@
+{{- $ctx := dict "root" . "component" "api" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shiptrack-api
+  labels:
+    {{- include "shiptrack.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not .Values.api.hpa.enabled }}
+  replicas: {{ .Values.api.replicas }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "shiptrack.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shiptrack.labels" $ctx | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: shiptrack-api
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- include "shiptrack.podSecurityContext" . | nindent 8 }}
+      topologySpreadConstraints:
+        {{- include "shiptrack.topologySpread" $ctx | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ include "shiptrack.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["api"]
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: ops
+              containerPort: 9090
+          env:
+            {{- include "shiptrack.commonEnv" . | nindent 12 }}
+            {{- include "shiptrack.dbEnv" (dict "root" . "pool" .Values.api.pool) | nindent 12 }}
+            - name: SHIPTRACK_EVENTS_QUEUE_URL
+              value: {{ required "aws.eventsQueueUrl is required" .Values.aws.eventsQueueUrl | quote }}
+            - name: SHIPTRACK_EVENT_BUS_NAME
+              value: {{ .Values.aws.eventBusName | quote }}
+            - name: SHIPTRACK_POD_BUCKET
+              value: {{ required "aws.podBucket is required" .Values.aws.podBucket | quote }}
+            - name: SHIPTRACK_BASE_URL
+              value: {{ .Values.baseUrl | quote }}
+            - name: SHIPTRACK_FAULT_ERROR_RATE
+              value: {{ .Values.faultErrorRate | quote }}
+            - name: SHIPTRACK_FAULT_READY_FAIL
+              value: {{ .Values.faultReadyFail | quote }}
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.api.preStopSleepSeconds }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            {{- include "shiptrack.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            {{- include "shiptrack.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "shiptrack.tmpVolume" . | nindent 8 }}

@@ -1,0 +1,20 @@
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: shiptrack-api
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "api") | nindent 4 }}
+spec:
+  serviceRef:
+    name: shiptrack-api
+    port: 8000
+  targetGroupARN: {{ required "alb.targetGroupArn is required" .Values.alb.targetGroupArn | quote }}
+  targetType: ip
+  networking:
+    ingress:
+      - from:
+          - securityGroup:
+              groupID: {{ required "alb.securityGroupId is required" .Values.alb.securityGroupId | quote }}
+        ports:
+          - protocol: TCP
+            port: 8000

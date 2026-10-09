@@ -1,0 +1,91 @@
+# Safe defaults. Per-environment sizing is in values-dev.yaml. Infrastructure identifiers (queue
+# URLs, the target group, secret ARNs) come from scripts/render-values.sh, and the image from the
+# deploy workflow. Nothing here is a secret: the pods read their credentials from Secrets Manager.
+
+image:
+  repository: ""
+  # Deployments reference the digest, never a tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+region: us-east-1
+# The VPC CIDR: the ALB's and the managed scraper's network interfaces are inside it.
+vpcCidr: ""
+# The platform base URL; the application turns on HSTS only when it is https.
+baseUrl: ""
+
+alb:
+  targetGroupArn: ""
+  securityGroupId: ""
+
+aws:
+  eventsQueueUrl: ""
+  notifyQueueUrl: ""
+  eventBusName: shiptrack
+  podBucket: ""
+  dbSecretArn: ""
+  dbMigratorSecretArn: ""
+
+logLevel: INFO
+# The Alembic revisions this build tolerates; /readyz fails when the database is on another one.
+schemaCompat: "0001"
+# Game days only (design 5.9). A fraction of API requests fail with INJECTED_FAULT.
+faultErrorRate: "0"
+faultReadyFail: false
+
+serviceAccount:
+  # Pod Identity injects its own projected token, so the default API token is not needed.
+  # Turn this on if credentials do not arrive without it, and record that in docs/ADR.md.
+  automountToken: false
+
+api:
+  replicas: 2
+  terminationGracePeriodSeconds: 45
+  preStopSleepSeconds: 15
+  pool: { size: 4, maxOverflow: 2 }
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 60
+    scaleDownStabilizationSeconds: 300
+  pdb: { minAvailable: 1 }
+
+workerEvents:
+  terminationGracePeriodSeconds: 90
+  pool: { size: 2, maxOverflow: 0 }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  keda: { minReplicaCount: 1, maxReplicaCount: 10, queueLength: 20 }
+  pdb: { maxUnavailable: 1 }
+
+workerNotify:
+  terminationGracePeriodSeconds: 60
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  keda: { minReplicaCount: 0, maxReplicaCount: 3, queueLength: 20 }
+
+slaScan:
+  # Suspended until Wave 3, when the legacy cron is removed first (design 5.5).
+  suspend: true
+  schedule: "*/5 * * * *"
+  pool: { size: 1, maxOverflow: 1 }
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+migrations:
+  # Rendered only after the schema ownership handoff (design 9.1).
+  enabled: false
+  pool: { size: 1, maxOverflow: 1 }
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+networkPolicy:
+  enabled: true

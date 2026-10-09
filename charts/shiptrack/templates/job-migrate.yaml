@@ -1,0 +1,49 @@
+{{- if .Values.migrations.enabled }}
+{{- $ctx := dict "root" . "component" "migrate" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shiptrack-migrate
+  labels:
+    {{- include "shiptrack.labels" $ctx | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "shiptrack.labels" $ctx | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shiptrack-migrate
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      securityContext:
+        {{- include "shiptrack.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "shiptrack.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate"]
+          env:
+            {{- include "shiptrack.commonEnv" . | nindent 12 }}
+            - name: SHIPTRACK_DB_MIGRATOR_SECRET_ARN
+              value: {{ required "aws.dbMigratorSecretArn is required" .Values.aws.dbMigratorSecretArn | quote }}
+            - name: SHIPTRACK_DB_POOL_SIZE
+              value: {{ .Values.migrations.pool.size | quote }}
+            - name: SHIPTRACK_DB_MAX_OVERFLOW
+              value: {{ .Values.migrations.pool.maxOverflow | quote }}
+            - name: SHIPTRACK_MIGRATIONS_ENABLED
+              value: "true"
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          securityContext:
+            {{- include "shiptrack.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            {{- include "shiptrack.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "shiptrack.tmpVolume" . | nindent 8 }}
+{{- end }}

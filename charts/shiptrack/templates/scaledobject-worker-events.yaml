@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: shiptrack-worker-events
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "worker-events") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: shiptrack-worker-events
+  minReplicaCount: {{ .Values.workerEvents.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.workerEvents.keda.maxReplicaCount }}
+  pollingInterval: 15
+  cooldownPeriod: 120
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: shiptrack-aws
+      metadata:
+        queueURL: {{ required "aws.eventsQueueUrl is required" .Values.aws.eventsQueueUrl | quote }}
+        queueLength: {{ .Values.workerEvents.keda.queueLength | quote }}
+        awsRegion: {{ .Values.region | quote }}

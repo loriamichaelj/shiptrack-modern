@@ -1,0 +1,62 @@
+{{- $ctx := dict "root" . "component" "worker-notify" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shiptrack-worker-notify
+  labels:
+    {{- include "shiptrack.labels" $ctx | nindent 4 }}
+spec:
+  # KEDA owns the replica count, down to zero.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "shiptrack.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shiptrack.labels" $ctx | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: shiptrack-worker-notify
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      terminationGracePeriodSeconds: {{ .Values.workerNotify.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- include "shiptrack.podSecurityContext" . | nindent 8 }}
+      topologySpreadConstraints:
+        {{- include "shiptrack.topologySpread" $ctx | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "shiptrack.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["worker-notify"]
+          ports:
+            - name: ops
+              containerPort: 9090
+          # No database access: only the queue it consumes.
+          env:
+            {{- include "shiptrack.commonEnv" . | nindent 12 }}
+            - name: SHIPTRACK_NOTIFY_QUEUE_URL
+              value: {{ required "aws.notifyQueueUrl is required" .Values.aws.notifyQueueUrl | quote }}
+          startupProbe:
+            httpGet: { path: /healthz, port: ops }
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: ops }
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.workerNotify.resources | nindent 12 }}
+          securityContext:
+            {{- include "shiptrack.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            {{- include "shiptrack.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "shiptrack.tmpVolume" . | nindent 8 }}

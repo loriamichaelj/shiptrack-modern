@@ -18,6 +18,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0012 | `aws-emulator-in-ci` | Accepted |
 | 0013 | `eks-addon-version-pinning` | Accepted |
 | 0014 | `pod-restart-alarm-source` | Accepted |
+| 0015 | `accepted-trivy-findings-in-the-eks-module` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -188,3 +189,13 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 **Decision:** A metric filter on the `performance` log group publishes the largest restart counter among pods in the namespace as `ShipTrack/Modern PodContainerRestarts`. The alarm watches its growth, `RATE(restarts) * 600`, and fires above 3 in ten minutes. The log groups are created by Terraform so the filters have something to attach to and so the groups get 14-day retention and the platform logs key.
 
 **Consequences:** Because the filter publishes a maximum, a restart in one pod can hide a smaller restart count in another during the same period. It is a cheap early warning, not a per-pod record; the per-pod series stay available in Container Insights.
+
+## ADR-0015: accepted-trivy-findings-in-the-eks-module
+
+**Status:** Accepted
+
+**Context:** The `iac` job gates on `trivy config` at HIGH and CRITICAL, and it fails on three CRITICAL findings, all raised on resources the `terraform-aws-modules/eks` module creates. AWS-0040 and AWS-0041 are the public API endpoint open to `0.0.0.0/0`, which design §8.1 and risk M-R1 already accept: GitHub-hosted runners have no stable addresses, access is IAM authentication plus access entries, and the private endpoint is always on. AWS-0104 is the node security group's egress-all rule. The module creates it with its recommended rules, which `node_security_group_enable_recommended_rules` turns on or off together, so narrowing egress means declaring every node ingress rule here instead.
+
+**Decision:** The three findings are accepted until 2027-04-10 in `.trivyignore`, each with an `exp:` date that Trivy enforces, and recorded in `docs/security/findings-register.md`. Narrowing egress is not attempted before the first apply, because the replacement rules cannot be tested without a cluster. `eks_public_cidrs` stays the control for the endpoint.
+
+**Consequences:** The gate stays strict for everything else. `.trivyignore` matches by ID, so AWS-0040, AWS-0041, and AWS-0104 are also silenced for any later resource in this repository until the entries expire; a reviewer has to catch a new open security group rule or cluster by eye. When an entry expires the gate fails again, which forces a decision: take over the node rules and restrict egress, move to a private endpoint with in-VPC runners, or renew the acceptance with a new date.

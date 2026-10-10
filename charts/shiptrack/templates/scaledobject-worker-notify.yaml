@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: shiptrack-worker-notify
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "worker-notify") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: shiptrack-worker-notify
+  minReplicaCount: {{ .Values.workerNotify.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.workerNotify.keda.maxReplicaCount }}
+  pollingInterval: 15
+  cooldownPeriod: 120
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: shiptrack-aws
+      metadata:
+        queueURL: {{ required "aws.notifyQueueUrl is required" .Values.aws.notifyQueueUrl | quote }}
+        queueLength: {{ .Values.workerNotify.keda.queueLength | quote }}
+        awsRegion: {{ .Values.region | quote }}

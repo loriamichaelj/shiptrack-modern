@@ -71,7 +71,7 @@ def test_validation_errors_use_the_envelope(client: TestClient) -> None:
     assert response.status_code == 422
     error = response.json()["error"]
     assert error["code"] == "VALIDATION_ERROR"
-    assert error["request_id"] is None
+    assert error["request_id"] == response.headers["x-request-id"]
     assert "origin" in error["message"]
 
 

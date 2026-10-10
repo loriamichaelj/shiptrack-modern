@@ -13,17 +13,29 @@ ShipTrack Modern starts as an unmodified import of the legacy application.
 `src/`, `migrations/`, `alembic.ini`, `tests/`, `web/`, `pyproject.toml`, `requirements.in`,
 `requirements.txt`, `requirements-dev.in`, and `requirements-dev.txt`.
 
-The first commit on `dev` that contains them is the import itself, with no changes. To check:
+The commit that imports them is `4f23aea`, with no changes. To check it against the tag:
 
 ```sh
-dest=$(mktemp -d)
-git -C ../shiptrack-legacy archive v1.0.0 src migrations alembic.ini tests web pyproject.toml \
-  requirements.in requirements.txt requirements-dev.in requirements-dev.txt | tar -x -C "$dest"
-diff -r "$dest/src" src   # empty until the first refactor commit
+dest=$(mktemp -d) && mkdir "$dest/legacy" "$dest/modern"
+paths="src migrations alembic.ini tests web pyproject.toml requirements.in requirements.txt requirements-dev.in requirements-dev.txt"
+git -C ../shiptrack-legacy archive v1.0.0 $paths | tar -x -C "$dest/legacy"
+git archive 4f23aea $paths | tar -x -C "$dest/modern"
+diff -r "$dest/legacy" "$dest/modern"   # empty
 ```
 
 Every later change to these paths is a refactor commit that names the remediation it implements,
-for example `REM-06: replace the in-process queue with SQS`.
+for example `REM-06: carry events through SQS instead of an in-process queue`. To see what a
+remediation changed, diff the import commit against the current tree:
+
+```sh
+git diff --stat 4f23aea HEAD -- src migrations
+git diff --stat 4f23aea HEAD -- web      # empty until Wave 2 completes: the UI source is frozen
+```
+
+The requirements files are replaced by `pyproject.toml` and `uv.lock` in the tooling commit that
+opens the application work (design 5.1). In `migrations/` only `env.py` changes, to take its
+credentials from Secrets Manager (REM-01); revision `0001` is the same, so a database that legacy
+created is a database modern can run against.
 
 ## Not imported
 

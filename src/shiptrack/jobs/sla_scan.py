@@ -1,77 +1,102 @@
-"""SLA breach scan, run from cron on every host.
+"""SLA breach scan, run by a single Kubernetes CronJob (REM-09).
 
-# LEGACY AP-09: cron runs on both instances and this scan is a naive read-then-write with no
-# locking, so two scanners that read before either writes both raise an alert for the same
-# shipment.
+The whole scan is one statement: it flags every overdue, undelivered, not-yet-flagged shipment and
+records an alert for exactly those rows. Two scanners that run at once cannot both flag the same
+shipment, because the second UPDATE waits for the first and then no longer matches the WHERE clause.
+So the result is correct however many scanners run, and the CronJob's `concurrencyPolicy: Forbid`
+is a second guard and not the only one.
 """
 
 from __future__ import annotations
 
-import dataclasses
-import logging
+import os
 import socket
-from collections.abc import Callable
+import sys
+import time
+from typing import NamedTuple
 
-from sqlalchemy import func, select, update
+import structlog
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from shiptrack.config import configure_logging, load_settings
-from shiptrack.db.models import Shipment, SlaAlert
+from shiptrack import metrics
+from shiptrack.config import load_settings
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.domain.models import format_utc
-from shiptrack.domain.status import Status
+from shiptrack.logconfig import configure_logging
+from shiptrack.secrets import SecretCache
 
-logger = logging.getLogger("shiptrack.sla")
+log = structlog.get_logger("shiptrack.sla")
 
-
-def run_scan(
-    session_factory: sessionmaker[Session],
-    hostname: str,
-    between_read_and_write: Callable[[], None] | None = None,
-) -> int:
-    """Alert on every undelivered, overdue, not-yet-flagged shipment; return how many.
-
-    `between_read_and_write` is a test hook that lets a test hold two scanners between the
-    read and the write so the AP-09 race is deterministic.
+SCAN_SQL = text(
     """
+    WITH breached AS (
+      UPDATE shiptrack.shipments
+         SET sla_breached = true, sla_breached_at = now(), updated_at = now()
+       WHERE status <> 'DELIVERED' AND promised_delivery_at < now() AND NOT sla_breached
+      RETURNING id, tracking_number, promised_delivery_at
+    ), alerted AS (
+      INSERT INTO shiptrack.sla_alerts (shipment_id, detected_by)
+      SELECT id, :pod_name FROM breached
+      RETURNING shipment_id
+    )
+    SELECT tracking_number, promised_delivery_at FROM breached
+    """
+)
+
+
+class Breach(NamedTuple):
+    tracking_number: str
+    promised_delivery_at: str
+
+
+def pod_name() -> str:
+    return os.environ.get("HOSTNAME") or socket.gethostname()
+
+
+def run_scan(session_factory: sessionmaker[Session], detected_by: str) -> list[Breach]:
+    """Flag and alert on every overdue shipment, in one transaction; return what was flagged."""
+    started = time.monotonic()
     with session_factory() as session:
-        overdue = session.execute(
-            select(Shipment.id, Shipment.tracking_number, Shipment.promised_delivery_at).where(
-                Shipment.status != Status.DELIVERED.value,
-                Shipment.promised_delivery_at < func.now(),
-                Shipment.sla_breached.is_(False),
-            )
-        ).all()
-        if between_read_and_write is not None:
-            between_read_and_write()
-        for shipment_id, tracking_number, promised in overdue:
-            session.add(SlaAlert(shipment_id=shipment_id, detected_by=hostname))
-            session.execute(
-                update(Shipment)
-                .where(Shipment.id == shipment_id)
-                .values(sla_breached=True, sla_breached_at=func.now(), updated_at=func.now())
-            )
-            logger.info(
-                "SLA_BREACH tracking=%s promised=%s host=%s",
-                tracking_number,
-                format_utc(promised),
-                hostname,
-            )
+        rows = session.execute(SCAN_SQL, {"pod_name": detected_by}).all()
         session.commit()
-    return len(overdue)
+    breaches = [Breach(r.tracking_number, format_utc(r.promised_delivery_at)) for r in rows]
+    for breach in breaches:
+        log.info(
+            "sla_breach",
+            tracking_number=breach.tracking_number,
+            promised=breach.promised_delivery_at,
+            detected_by=detected_by,
+        )
+    metrics.SLA_BREACHES.inc(len(breaches))
+    # This record is also the heartbeat the "scan has stopped running" alarm watches for.
+    log.info(
+        "sla_scan_completed",
+        breaches=len(breaches),
+        duration_ms=round((time.monotonic() - started) * 1000, 1),
+    )
+    return breaches
 
 
-def main() -> None:
-    # Cron redirects stdout/stderr to sla.log, so log to the console only.
-    settings = dataclasses.replace(load_settings(), log_file=None)
-    configure_logging(settings)
-    engine = create_db_engine(settings)
+def main() -> int:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    engine = create_db_engine(
+        settings,
+        settings.require_db_secret(),
+        SecretCache(settings.aws_region),
+        pool_size=1,
+        max_overflow=1,
+    )
     try:
-        count = run_scan(create_session_factory(engine), socket.gethostname())
-        logger.info("sla scan finished breaches=%d", count)
+        run_scan(create_session_factory(engine), pod_name())
+    except Exception:
+        log.exception("sla_scan_failed")
+        return 1
     finally:
         engine.dispose()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

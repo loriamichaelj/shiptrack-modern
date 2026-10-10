@@ -1,0 +1,10 @@
+# Accepted Trivy findings. Every entry carries an exp: date that Trivy enforces, a reason, and a row
+# in docs/security/findings-register.md. The decision is ADR-0015. Remove an entry when the finding
+# is fixed; do not extend a date without re-deciding.
+
+# expires: 2027-04-10 Public EKS endpoint (risk M-R1): GitHub-hosted runners have no stable addresses, access is IAM plus access entries, and the private endpoint is always on.
+AWS-0040 exp:2027-04-10
+AWS-0041 exp:2027-04-10
+
+# expires: 2027-04-10 Node security group egress-all comes from the EKS module's recommended rules, which are all-or-nothing; nodes reach ECR, STS, and S3 through NAT.
+AWS-0104 exp:2027-04-10

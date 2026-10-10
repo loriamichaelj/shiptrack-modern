@@ -1,19 +1,19 @@
 """Error envelope and exception handlers.
 
 Every 4xx/5xx response, including validation errors, uses:
-    {"error": {"code": "...", "message": "...", "request_id": null}}
+    {"error": {"code": "...", "message": "...", "request_id": "<id of the request>"}}
+Legacy sent null for request_id; modern fills it in so a caller can quote it.
 """
 
 from __future__ import annotations
 
-import logging
-
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger("shiptrack.errors")
 
 _STATUS_CODES = {404: "NOT_FOUND", 422: "VALIDATION_ERROR"}
 
@@ -30,10 +30,11 @@ def not_found(message: str = "Not found") -> ApiError:
     return ApiError(404, "NOT_FOUND", message)
 
 
-def _envelope(status_code: int, code: str, message: str) -> JSONResponse:
+def _envelope(request: Request, status_code: int, code: str, message: str) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None)
     return JSONResponse(
         status_code=status_code,
-        content={"error": {"code": code, "message": message, "request_id": None}},
+        content={"error": {"code": code, "message": message, "request_id": request_id}},
     )
 
 
@@ -47,20 +48,20 @@ def _validation_message(exc: RequestValidationError) -> str:
 
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
-    async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
-        return _envelope(exc.status_code, exc.code, exc.message)
+    async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
+        return _envelope(request, exc.status_code, exc.code, exc.message)
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
-        return _envelope(422, "VALIDATION_ERROR", _validation_message(exc))
+    async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        return _envelope(request, 422, "VALIDATION_ERROR", _validation_message(exc))
 
     @app.exception_handler(StarletteHTTPException)
-    async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+    async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         fallback = "INTERNAL" if exc.status_code >= 500 else "VALIDATION_ERROR"
         code = _STATUS_CODES.get(exc.status_code, fallback)
-        return _envelope(exc.status_code, code, str(exc.detail))
+        return _envelope(request, exc.status_code, code, str(exc.detail))
 
     @app.exception_handler(Exception)
-    async def _unhandled(_: Request, exc: Exception) -> JSONResponse:
-        logger.exception("unhandled error", exc_info=exc)
-        return _envelope(500, "INTERNAL", "Internal server error")
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        log.exception("unhandled_error", error=type(exc).__name__)
+        return _envelope(request, 500, "INTERNAL", "Internal server error")

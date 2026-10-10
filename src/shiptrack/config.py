@@ -1,94 +1,101 @@
-"""Configuration loader and logging setup.
+"""Configuration from environment variables (REM-01).
 
-# LEGACY AP-01: database credentials live in a plaintext INI file on disk
-# (/etc/shiptrack/app.ini, mode 0644), rendered by user-data from the migrator secret.
+Nothing is read from a file and no credential is configured here: the database credentials are
+fetched from Secrets Manager at startup (see `shiptrack.secrets`).
 """
 
 from __future__ import annotations
 
-import configparser
 import logging
-import os
-from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy.engine import URL
-
-DEFAULT_CONFIG_PATH = Path("/etc/shiptrack/app.ini")
-CONFIG_ENV_VAR = "SHIPTRACK_CONFIG"
-DEFAULT_POD_DIR = Path("/var/lib/shiptrack/pod")
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ConfigError(Exception):
-    """The configuration file is missing or incomplete."""
+    """A setting that a command needs is missing."""
 
 
-@dataclass(frozen=True)
-class Settings:
-    db_host: str
-    db_port: int
-    db_name: str
-    db_user: str
-    db_password: str
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="SHIPTRACK_", extra="ignore")
+
+    # Credentials: the ARN of the secret, never the secret itself.
+    db_secret_arn: str | None = None
+    db_migrator_secret_arn: str | None = None
     db_sslmode: str = "require"
-    pod_dir: Path = DEFAULT_POD_DIR
-    log_file: Path | None = None
+
+    # Connection pool, set per workload in Helm (design 5.10).
+    db_pool_size: int = Field(default=4, ge=1)
+    db_max_overflow: int = Field(default=2, ge=0)
+
+    # AWS resources.
+    events_queue_url: str | None = None
+    notify_queue_url: str | None = None
+    event_bus_name: str | None = None
+    pod_bucket: str | None = None
+    aws_region: str | None = Field(default=None, validation_alias="AWS_REGION")
+
+    # Alembic revisions this build tolerates (design 9.1). /readyz fails when the database is at
+    # any other revision.
+    schema_compat: str = "0001"
+
     log_level: str = "INFO"
 
+    # Whether `migrate` may run. It stays off until schema ownership is handed over (design 9.1).
+    migrations_enabled: bool = False
+
+    # Where the built UI is baked into the image.
+    web_dist: Path = Path("/app/web/dist")
+
+    # The platform base URL decides whether to send Strict-Transport-Security.
+    base_url: str = ""
+
+    # Game days only (design 5.9).
+    fault_error_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    fault_ready_fail: bool = False
+
+    @field_validator("log_level")
+    @classmethod
+    def _upper(cls, value: str) -> str:
+        level = value.upper()
+        if level not in logging.getLevelNamesMapping():
+            raise ValueError(f"unknown log level: {value}")
+        return level
+
     @property
-    def database_url(self) -> URL:
-        # A URL object (not a string) so passwords never need escaping.
-        return URL.create(
-            "postgresql+psycopg",
-            username=self.db_user,
-            password=self.db_password,
-            host=self.db_host,
-            port=self.db_port,
-            database=self.db_name,
-            query={"sslmode": self.db_sslmode},
-        )
+    def schema_compat_revisions(self) -> frozenset[str]:
+        return frozenset(part.strip() for part in self.schema_compat.split(",") if part.strip())
+
+    @property
+    def hsts_enabled(self) -> bool:
+        return self.base_url.lower().startswith("https://")
+
+    def require_db_secret(self) -> str:
+        if not self.db_secret_arn:
+            raise ConfigError("SHIPTRACK_DB_SECRET_ARN is required")
+        return self.db_secret_arn
+
+    def require_events_queue(self) -> str:
+        if not self.events_queue_url:
+            raise ConfigError("SHIPTRACK_EVENTS_QUEUE_URL is required")
+        return self.events_queue_url
+
+    def require_pod_bucket(self) -> str:
+        if not self.pod_bucket:
+            raise ConfigError("SHIPTRACK_POD_BUCKET is required")
+        return self.pod_bucket
+
+    def require_notify_queue(self) -> str:
+        if not self.notify_queue_url:
+            raise ConfigError("SHIPTRACK_NOTIFY_QUEUE_URL is required")
+        return self.notify_queue_url
+
+    def require_migrator_secret(self) -> str:
+        if not self.db_migrator_secret_arn:
+            raise ConfigError("SHIPTRACK_DB_MIGRATOR_SECRET_ARN is required")
+        return self.db_migrator_secret_arn
 
 
-def load_settings(path: Path | None = None) -> Settings:
-    """Read settings from the INI file (path argument, then SHIPTRACK_CONFIG, then default)."""
-    config_path = path or Path(os.environ.get(CONFIG_ENV_VAR, str(DEFAULT_CONFIG_PATH)))
-    # interpolation=None: passwords may contain "%".
-    parser = configparser.ConfigParser(interpolation=None)
-    if not parser.read(config_path):
-        raise ConfigError(f"configuration file not found: {config_path}")
-    try:
-        database = parser["database"]
-        app = parser["app"] if parser.has_section("app") else {}
-        log_file = app.get("log_file", "").strip()
-        return Settings(
-            db_host=database["host"],
-            db_port=int(database.get("port", "5432")),
-            db_name=database["name"],
-            db_user=database["user"],
-            db_password=database["password"],
-            db_sslmode=database.get("sslmode", "require"),
-            pod_dir=Path(app.get("pod_dir", str(DEFAULT_POD_DIR))),
-            log_file=Path(log_file) if log_file else None,
-            log_level=app.get("log_level", "INFO").upper(),
-        )
-    except KeyError as exc:
-        raise ConfigError(f"missing configuration key: {exc.args[0]}") from exc
-    except ValueError as exc:
-        raise ConfigError(f"invalid configuration value: {exc}") from exc
-
-
-def configure_logging(settings: Settings) -> None:
-    """Plain-text logging.
-
-    # LEGACY AP-08: unstructured text logs written to files and tailed by the CloudWatch
-    # agent; there is no request ID, so a single request cannot be correlated across lines.
-    """
-    handlers: list[logging.Handler] = [logging.StreamHandler()]
-    if settings.log_file is not None:
-        handlers.append(logging.FileHandler(settings.log_file))
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        handlers=handlers,
-        force=True,
-    )
+def load_settings() -> Settings:
+    return Settings()

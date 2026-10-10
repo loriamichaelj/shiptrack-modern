@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: shiptrack-worker-events
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "worker-events") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.workerEvents.pdb.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "shiptrack.selectorLabels" (dict "root" . "component" "worker-events") | nindent 6 }}

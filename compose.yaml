@@ -1,0 +1,110 @@
+# Local use only: the app, Postgres, and an AWS API emulator. Nothing here runs in AWS.
+#
+#   export LOCALSTACK_AUTH_TOKEN=...      # LocalStack needs an account token
+#   docker compose up --build -d
+#   curl localhost:8000/readyz            # the UI is at http://localhost:8000/ui/
+#   docker compose down -v
+#
+# The emulator answers to localhost.localstack.cloud, which resolves to it inside this network and to
+# 127.0.0.1 on your machine, so a presigned POD URL the API hands out opens from the host too.
+# The credentials below are the emulator's throwaway values.
+x-app: &app
+  build: .
+  image: shiptrack-modern:local
+  environment: &env
+    AWS_ENDPOINT_URL: http://localhost.localstack.cloud:4566
+    AWS_REGION: us-east-1
+    AWS_ACCESS_KEY_ID: test
+    AWS_SECRET_ACCESS_KEY: test
+    SHIPTRACK_DB_SECRET_ARN: shiptrack/db/app
+    SHIPTRACK_DB_MIGRATOR_SECRET_ARN: shiptrack/db/migrator
+    SHIPTRACK_DB_SSLMODE: disable
+    SHIPTRACK_EVENTS_QUEUE_URL: http://localhost.localstack.cloud:4566/000000000000/shiptrack-carrier-events
+    SHIPTRACK_NOTIFY_QUEUE_URL: http://localhost.localstack.cloud:4566/000000000000/shiptrack-notifications
+    SHIPTRACK_EVENT_BUS_NAME: shiptrack
+    SHIPTRACK_POD_BUCKET: shiptrack-pod
+  depends_on:
+    init:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shiptrack
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shiptrack"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  localstack:
+    image: localstack/localstack:latest
+    environment:
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:?set LOCALSTACK_AUTH_TOKEN}
+      SERVICES: sqs,s3,secretsmanager,events
+    networks:
+      default:
+        aliases:
+          - localhost.localstack.cloud
+    ports:
+      - "127.0.0.1:4566:4566"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:4566/_localstack/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  init:
+    image: amazon/aws-cli:latest
+    entrypoint: ["/bin/sh", "/init.sh"]
+    environment:
+      AWS_ENDPOINT_URL: http://localhost.localstack.cloud:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    volumes:
+      - ./scripts/local-init.sh:/init.sh:ro
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    environment:
+      <<: *env
+      SHIPTRACK_MIGRATIONS_ENABLED: "true"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["api"]
+    ports:
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker-events:
+    <<: *app
+    command: ["worker-events"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker-notify:
+    <<: *app
+    command: ["worker-notify"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully

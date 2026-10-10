@@ -1,0 +1,24 @@
+# The dev environment: replicas, scaling, and sizing. The connection budget in docs/ADR.md
+# (ADR-0002) is checked against these numbers by tests/unit/test_connection_budget.py.
+baseUrl: ""
+
+logLevel: INFO
+
+api:
+  hpa:
+    minReplicas: 2
+    maxReplicas: 10
+  pool: { size: 4, maxOverflow: 2 }
+
+workerEvents:
+  keda: { minReplicaCount: 1, maxReplicaCount: 10, queueLength: 20 }
+  pool: { size: 2, maxOverflow: 0 }
+
+workerNotify:
+  keda: { minReplicaCount: 0, maxReplicaCount: 3, queueLength: 20 }
+
+slaScan:
+  suspend: true
+
+migrations:
+  enabled: false

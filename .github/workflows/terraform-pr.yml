@@ -1,0 +1,83 @@
+name: terraform-pr
+
+# Plans both roots for every pull request that touches Terraform. ci.yml already formats, validates,
+# lints, and scans them without AWS access, so this only adds the plan, which needs the plan role and
+# therefore never runs for a fork. The comment shows resource addresses and actions, never attribute
+# values, and plan files are never uploaded.
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/scripts/terraform-ci.sh"
+      - ".github/workflows/terraform-pr.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.16.4"
+
+jobs:
+  plan:
+    # Forks receive no OIDC token, so the plan role is unreachable from them.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_VAR_owner: ${{ github.repository_owner }}
+      TF_VAR_role_prefix: ${{ vars.ROLE_PREFIX }}
+      TF_VAR_admin_role_arns: ${{ vars.ADMIN_ROLE_ARNS || '[]' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Plan the cluster root
+        env:
+          TF_DIR: terraform/cluster
+          TF_STATE_KEY: modern/cluster/dev.tfstate
+          SUMMARY_FILE: ${{ runner.temp }}/plan-cluster.md
+        run: .github/scripts/terraform-ci.sh plan
+      - name: Plan the addons root
+        env:
+          TF_DIR: terraform/addons
+          TF_STATE_KEY: modern/addons/dev.tfstate
+          REQUIRES_SSM: /shiptrack/modern/cluster_name
+          SUMMARY_FILE: ${{ runner.temp }}/plan-addons.md
+        run: .github/scripts/terraform-ci.sh plan
+      - name: Comment the plan summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "### Terraform plan: modern/dev"
+            echo
+            echo "Addresses and actions only; no values."
+            echo
+            echo "#### cluster"
+            echo
+            cat "$RUNNER_TEMP/plan-cluster.md"
+            echo
+            echo "#### addons"
+            echo
+            cat "$RUNNER_TEMP/plan-addons.md"
+          } >"$RUNNER_TEMP/comment.md"
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --edit-last --create-if-none --body-file "$RUNNER_TEMP/comment.md"

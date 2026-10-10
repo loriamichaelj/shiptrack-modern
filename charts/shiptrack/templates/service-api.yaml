@@ -1,0 +1,15 @@
+{{- $ctx := dict "root" . "component" "api" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: shiptrack-api
+  labels:
+    {{- include "shiptrack.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "shiptrack.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

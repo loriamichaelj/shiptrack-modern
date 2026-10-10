@@ -4,7 +4,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 | # | Title | Status |
 |---|---|---|
-| 0001 | `fork-strategy` | Accepted |
+| 0001 | `fork-strategy` | Accepted; one commit per REM on `dev` amended by ADR-0016 |
 | 0002 | `db-connection-budget` | Accepted |
 | 0003 | `no-cpu-limits` | Accepted |
 | 0004 | `pod-identity-token-automount` | Planned |
@@ -19,6 +19,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0013 | `eks-addon-version-pinning` | Accepted |
 | 0014 | `pod-restart-alarm-source` | Accepted |
 | 0015 | `accepted-trivy-findings-in-the-eks-module` | Accepted |
+| 0016 | `squash-merge-and-remediation-history` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -29,6 +30,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** The first commit imports legacy `v1.0.0` unmodified (`docs/FORK.md` records the source). Every later change is a separate commit that names the REM it implements. The API contract (legacy design §3.4) is frozen, with the additions listed in design §1. The UI source in `web/` is not edited until Wave 2 completes, so both stacks serve one UI build.
 
 **Consequences:** `git log` reads as the remediation story, and any REM can be reviewed or reverted alone. The contract suite runs unchanged against both stacks. UI changes wait for Wave 2.
+
+**Amended by ADR-0016:** pull requests are squash-merged, so on `dev` the remediation story is told by pull requests and squash commit bodies rather than one commit per REM. The import commit is unaffected.
 
 ## ADR-0002: db-connection-budget
 
@@ -199,3 +202,13 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 **Decision:** The three findings are accepted until 2027-04-10 in `.trivyignore`, each with an `exp:` date that Trivy enforces, and recorded in `docs/security/findings-register.md`. Narrowing egress is not attempted before the first apply, because the replacement rules cannot be tested without a cluster. `eks_public_cidrs` stays the control for the endpoint.
 
 **Consequences:** The gate stays strict for everything else. `.trivyignore` matches by ID, so AWS-0040, AWS-0041, and AWS-0104 are also silenced for any later resource in this repository until the entries expire; a reviewer has to catch a new open security group rule or cluster by eye. When an entry expires the gate fails again, which forces a decision: take over the node rules and restrict egress, move to a private endpoint with in-VPC runners, or renew the acceptance with a new date.
+
+## ADR-0016: squash-merge-and-remediation-history
+
+**Status:** Accepted
+
+**Context:** ADR-0001 expected one commit per REM on `dev`. M1 to M6 were built as eighteen commits, and the repository allows squash, merge, and rebase merges. The owner chose squash for pull request #3 and for the other two repositories, which keeps `dev` linear with one commit per pull request.
+
+**Decision:** Pull requests are squash-merged. The pull request title or the squash commit subject names the REM it implements, and the squash body lists the commits it was built from, as pull request #3 does. The import commit (`4f23aea`) stays a standalone commit on `dev`, so every check in `docs/FORK.md` still holds. The individual commits remain readable on the pull request ref, `refs/pull/<n>/head`.
+
+**Consequences:** On `dev`, M1 to M6 are one commit, so one REM inside it cannot be reverted with `git revert`; it has to be undone by hand. From here, a remediation that may need reverting or reviewing alone is its own pull request. Design §15 criterion 1 (every REM appears in at least one commit message) holds because the squash bodies name them.

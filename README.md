@@ -2,9 +2,10 @@
 
 ShipTrack v2: the "after" stack of the EC2-to-EKS migration. The same API and UI as
 [`shiptrack-legacy`](https://github.com/loriamichaelj/shiptrack-legacy), running on EKS, with each
-of legacy's anti-patterns fixed. The history is the story: the first commit imports legacy `v1.0.0`
-unmodified (`docs/FORK.md`), and every later change to the application names the remediation it
-implements (`REM-01` to `REM-16`, design §2).
+of legacy's anti-patterns fixed. The fork is recorded, not hidden: the first commit imports legacy
+`v1.0.0` unmodified (`docs/FORK.md`), and every later change to the application names the
+remediation it implements (`REM-01` to `REM-16`, design §2) in its pull request and in the squash
+commit that lands it.
 
 - Design: [`docs/DESIGN.md`](docs/DESIGN.md)
 - Decisions: [`docs/ADR.md`](docs/ADR.md)
@@ -119,7 +120,8 @@ repository.
 ## Rules that apply here
 
 - `dev` is the default and protected branch; work happens on short-lived branches and merges by pull
-  request. Keep the history: one commit per remediation is the point of the fork.
+  request, squashed (ADR-0016). Name each remediation (`REM-nn`) in the pull request title or the
+  squash commit body. A remediation that may need reverting on its own is its own pull request.
 - No account IDs, ARNs with account IDs, ALB addresses, or secret values in committed files, logs, or
   PR comments. Use `<ACCOUNT_ID>` and friends. Plan files are never uploaded.
 - Every IAM role and customer managed policy is named `<PREFIX>-...` (the `ROLE_PREFIX` repository

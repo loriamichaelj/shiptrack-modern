@@ -37,7 +37,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  UV_VERSION: "0.12.22"
+  UV_VERSION: "0.13.0"
   PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
   RELEASE: shiptrack
   NAMESPACE: shiptrack

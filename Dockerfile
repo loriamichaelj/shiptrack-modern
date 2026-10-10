@@ -2,7 +2,7 @@
 # Base images are pinned by digest; Dependabot updates them (REM-14).
 
 # The UI build. The Node version must equal web/.nvmrc and legacy's UI build (cutover gate G6).
-FROM --platform=$BUILDPLATFORM node:24.19.0-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS web
+FROM --platform=$BUILDPLATFORM node:26.10.0-slim@sha256:930557a230abacbc3f4fd9b8648abf8f4bee1e17cb72195dcdfb2f709bc85b33 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json web/.npmrc ./
 RUN npm ci

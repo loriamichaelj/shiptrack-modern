@@ -191,6 +191,16 @@ run "every_role_has_the_prefix_and_the_boundary" {
     condition     = toset(keys(module.pod_role)) == toset(["api", "worker-events", "worker-notify", "sla-scan", "migrate", "lbc", "keda", "grafana"]) && module.cwagent_role.name == "testowner-dev-shiptrack-modern-cwagent"
     error_message = "One role per workload and controller, with cwagent managed by the add-on."
   }
+
+  # The EKS module creates these itself; left at its defaults the node group role is named
+  # <group>-eks-node-group-<suffix>, which the apply role is not allowed to create.
+  assert {
+    condition = alltrue([
+      startswith(module.eks.cluster_iam_role_name, "testowner-dev-shiptrack-modern-"),
+      startswith(module.eks.eks_managed_node_groups["system"].iam_role_name, "testowner-dev-shiptrack-modern-"),
+    ])
+    error_message = "The roles the EKS module creates are named <PREFIX>-modern-<component>."
+  }
 }
 
 run "the_service_accounts_match_the_chart" {

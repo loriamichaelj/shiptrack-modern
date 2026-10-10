@@ -127,6 +127,12 @@ module "eks" {
 
   eks_managed_node_groups = {
     system = {
+      # The node group makes its own role. Left alone it is named <group>-eks-node-group-<suffix>,
+      # which the apply role may not create and which would carry no boundary.
+      iam_role_name                 = local.role_name["node"]
+      iam_role_use_name_prefix      = false
+      iam_role_permissions_boundary = local.platform.permission_boundary_arn
+
       ami_type       = "AL2023_ARM_64_STANDARD"
       instance_types = [var.node_instance_type]
       capacity_type  = "ON_DEMAND"

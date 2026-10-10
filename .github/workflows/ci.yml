@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UV_VERSION: "0.12.22"
+  UV_VERSION: "0.13.0"
   TF_VERSION: "1.16.4"
   TFLINT_VERSION: "v0.64.0"
   TRIVY_VERSION: "v0.74.0"

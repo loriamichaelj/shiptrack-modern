@@ -12,6 +12,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The UI build must use the Node version in web/.nvmrc, the same one legacy builds with
+      # (cutover gate G6). web/ is frozen until Wave 2 completes, so Node moves with it, not before.
+      - dependency-name: node
   - package-ecosystem: uv
     directory: /
     schedule:
@@ -26,6 +30,10 @@ updates:
     groups:
       web:
         patterns: ["*"]
+    ignore:
+      # web/ is frozen until Wave 2 completes so both stacks serve one UI build (gate G6). Remove
+      # this entry when the freeze ends.
+      - dependency-name: "*"
   - package-ecosystem: terraform
     directory: /terraform/cluster
     schedule:

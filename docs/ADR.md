@@ -26,6 +26,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0020 | `waves-gated-by-evidence-not-durations` | Accepted |
 | 0021 | `accepted-node-image-findings-until-rebuilt-ami` | Accepted |
 | 0022 | `event-route-latency-allowance` | Accepted |
+| 0023 | `contract-migration-not-taken` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -297,3 +298,13 @@ Conditions:
 **Decision:** The event route is allowed a p95 of legacy's plus 50 ms (platform ADR-0031). Reducing the gap is a follow-up and does not block the waves.
 
 **Consequences:** Every wave record states G3 per route. A gap over 50 ms on the event route, or over 1.2 times on another route, is a failed G3. Candidates for narrowing it: reuse of the SQS client and its connection, and the region-local endpoint; neither has been measured.
+
+## ADR-0023: contract-migration-not-taken
+
+**Status:** Accepted
+
+**Context:** Design §9.1 ends the migration with a contract migration (modern M10): three Alembic revisions that delete duplicate `sla_alerts` and add a unique constraint on `shipment_id`. It is the point of no return for rolling back to legacy. By the time it would run, the single CronJob with its atomic `UPDATE … RETURNING` already produces one alert per breach: `evidence sla-duplicates` read `alerts=3 shipments=0 extra_alerts=0` after the `contract-sla` test (platform run 38178609695), and had never shown a duplicate. The owner asked that legacy stay a fallback.
+
+**Decision:** The contract migration is not built and not run. Legacy stays running (platform ADR-0032), and rolling back stays possible: `rollback-cutover.yml` sends traffic to legacy, and `legacy-cron.yml restore-sla` puts legacy's SLA cron back.
+
+**Consequences:** "Exactly one alert per breach" holds because there is one scanner and the scan is one atomic statement, not because the database refuses a second row. If legacy's SLA cron is restored for a rollback, modern's CronJob has to be suspended first, or AP-09 returns: two scanners can alert twice. The unique constraint can be added later, after legacy is retired, as the same three revisions.

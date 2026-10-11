@@ -47,7 +47,7 @@
 | REM-06 | AP-06 | API → SQS (202 only after `SendMessage` succeeds) → worker; DLQ; idempotent apply | App, §8.1 |
 | REM-07 | AP-07 | `/healthz` liveness, `/readyz` readiness, startup probe; LBC pod readiness gates | App, Helm |
 | REM-08 | AP-08 | Structured JSON logs to stdout with `request_id`; shipped by the CloudWatch Observability add-on (Fluent Bit) | App, add-on |
-| REM-09 | AP-09 | Single CronJob (`concurrencyPolicy: Forbid`) + atomic `UPDATE … RETURNING`; unique constraint added in Wave 3 | App, Helm, migration |
+| REM-09 | AP-09 | Single CronJob (`concurrencyPolicy: Forbid`) + atomic `UPDATE … RETURNING`; a unique constraint is the contract migration of §9.1, not taken (ADR-0023) | App, Helm, migration |
 | REM-10 | AP-10 | HPA (API), KEDA (workers), Karpenter consolidation, Graviton | Helm, add-ons |
 | REM-11 | AP-11 | No app data on node disks; gp3 node root volumes sized to need | Terraform |
 | REM-12 | AP-12 | Immutable images by digest; rolling update `maxUnavailable: 0`; readiness gates + preStop + 30 s deregistration | Helm, platform TG |
@@ -555,16 +555,16 @@ Both: instance categories c/m/r, generation > 5, `limits.cpu: 32`. Workloads sel
 | Period | Schema owner | Legacy `RUN_MIGRATIONS` | Modern `migrations.enabled` | Rule |
 |---|---|---|---|---|
 | Before and during Waves 0–2 | **legacy** | true | false | Modern must run against legacy's head revision |
-| After Wave 2 reaches 100% with G1–G5 passing | **modern** | false | true | All migrations expand/contract; legacy (scaled down but possibly rolled back to) must tolerate them until decommission |
+| After Wave 2 reaches 100% with G1–G5 passing | **modern** | false | true | All migrations expand/contract; legacy (kept running as the fallback, ADR-0023) must tolerate them |
 
 **Compatibility guard:** at startup, the app reads `alembic_version`. If the revision is not in `SHIPTRACK_SCHEMA_COMPAT`, `/readyz` returns 503 and logs `schema_incompatible`. This prevents silent drift.
 
-**Wave 3 contract migration** (REM-09 hardening), as three separate Alembic revisions:
+**Contract migration** (REM-09 hardening), not taken: modern ADR-0023 keeps legacy as a fallback. It would be three separate Alembic revisions:
 1. Data: delete duplicate `sla_alerts`, keeping `min(id)` per `shipment_id`.
 2. `CREATE UNIQUE INDEX CONCURRENTLY uq_sla_alerts_shipment ON shiptrack.sla_alerts (shipment_id)`, inside an `autocommit_block()`.
 3. `ALTER TABLE … ADD CONSTRAINT … UNIQUE USING INDEX`.
 
-This is documented in `docs/runbooks/wave-3-contract-migration.md` as the **point of no return** for legacy rollback.
+If it is ever run, it is the point of no return for rolling back to legacy.
 
 ### 9.2 Waves
 
@@ -574,7 +574,7 @@ This is documented in `docs/runbooks/wave-3-contract-migration.md` as the **poin
 | **1 — Read path + UI** | Wave 0 exit, including G6 | Platform PR: `cutover.track` modern 10 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7). Moves `/api/v1/track/*` and `/ui/*` together; the UI rule is sticky, so existing browser sessions stay on their stack | Platform gates G1–G4 per step; UI stack badge shows `modern` for new sessions | Platform PR or break-glass: `track.modern = 0` |
 | **2 — Write path** | Wave 1 at 100%; legacy **v1.1.0** deployed; `migrate_pod_to_s3.py` run on both hosts; PodSync cron installed; **G-POD:** `SELECT count(*) FROM shiptrack.pod_documents WHERE storage_uri LIKE 'file://%' AND uploaded_at < now() - interval '5 minutes'` = 0 (run through the allow-listed `pod-gate` evidence script, legacy §7.6); legacy change freeze on | `cutover.default` modern 10 → 25 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7) | G1–G5; DLQ = 0; simulator ledger `verify` shows 0 lost events for modern-routed traffic; no `pod_not_migrated` event for a POD older than 5 minutes | Weight back to legacy. **Keep workers running** until the events queue drains; S3 PODs are readable by legacy v1.1 |
 | **Handoff** | Wave 2 at 100% with G1–G5 passing | Flip schema ownership (§9.1) | Modern deploy with `migrations.enabled=true` is a no-op at head | Revert flags |
-| **3 — Scheduled jobs + decommission** | Handoff complete | 1) SSM: remove `/etc/cron.d/shiptrack-sla` and `shiptrack-podsync` from legacy hosts; 2) Helm: `slaScan.suspend=false`, enable heartbeat alarm; 3) verify exactly one alert per breach; 4) contract migration (§9.1); 5) legacy ASG → 0 (legacy PR); 6) once steps 3 and 4 are verified, destroy legacy stack and remove tg-legacy routing (platform PR) | Final cost snapshot captured | Before step 4: re-enable legacy cron, suspend CronJob. **After step 4: forward-fix only.** |
+| **3 — Scheduled jobs + decommission** | Handoff complete | 1) SSM: remove `/etc/cron.d/shiptrack-sla` and `shiptrack-podsync` from legacy hosts; 2) Helm: `slaScan.suspend=false`, enable heartbeat alarm; 3) verify exactly one alert per breach; 4) the contract migration (§9.1) is not taken; 5) legacy keeps running behind the preview port and nothing is destroyed (platform ADR-0032) | Final cost snapshot captured | Suspend the CronJob and re-enable legacy's cron (`legacy-cron.yml restore-sla`); `rollback-cutover.yml` sends traffic to legacy |
 
 ### 9.3 Validation evidence per wave
 Store everything under `docs/migration/wave-N/`, scrubbed of account IDs, ARNs, DNS names, and tokens before merge (platform §6.12):
@@ -763,7 +763,7 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 | **M7 Observability** | Alarms, SLO doc, dashboards, Log Insights queries | Every alarm has owner/sev/runbook |
 | **M8 Cutover + game days** | Runbooks, `gamedays/`, wave evidence templates | Runbooks are copy-pasteable |
 | **M9 Optimization** | Karpenter (NodePools, EC2NodeClass), Graviton, spot workers, scale-to-zero, log tuning, cost analysis template | Plan clean; analysis template has a slot per O-item |
-| **M10 Wave 3 contract migration** *(on request)* | Three Alembic revisions + runbook | Tested against a DB containing seeded duplicates |
+| **M10 Wave 3 contract migration** *(not taken, ADR-0023)* | Three Alembic revisions + runbook | Tested against a DB containing seeded duplicates |
 
 ---
 

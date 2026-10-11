@@ -60,6 +60,8 @@ jobs:
           TF_DIR: terraform/addons
           TF_STATE_KEY: modern/addons/dev.tfstate
           REQUIRES_SSM: /shiptrack/modern/cluster_name
+          # The plan role cannot read Helm release Secrets or RBAC objects (see terraform-ci.sh).
+          PLAN_REFRESH: "false"
           SUMMARY_FILE: ${{ runner.temp }}/plan-addons.md
         run: .github/scripts/terraform-ci.sh plan
       - name: Comment the plan summary

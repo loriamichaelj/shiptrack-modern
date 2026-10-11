@@ -15,6 +15,8 @@
 #                     root reads what the cluster root publishes, so before the cluster is applied
 #                     there is nothing to plan against.
 #   SUMMARY_FILE      where `plan` writes the address-and-action summary as Markdown (optional)
+#   PLAN_REFRESH      `false` plans against the state without refreshing it (optional). For a root
+#                     whose resources the plan role cannot read; see the comment at the plan below.
 #   PRINT_OUTPUTS     space-separated output names to print as HCL after an apply, and the outputs
 #                     to print in `outputs` mode (required there). Only for outputs that hold no
 #                     identifiers, such as add-on versions: the log of a public repository is public.
@@ -117,8 +119,19 @@ fi
 # The plan file stays on the runner: it is never uploaded, and apply makes its own in the same job.
 plan=$(mktemp -u)
 trap 'rm -f "$plan"' EXIT
-quietly terraform plan -input=false -lock-timeout=120s -out="$plan"
+# The plan role reads the cluster through the EKS view policy, which excludes Secrets and RBAC
+# objects. Helm keeps a release as a Secret, so a refresh cannot see the releases and plans to
+# create them again, and it is refused the Role it manages. PLAN_REFRESH=false plans such a root
+# against its state; the apply job, with the apply role, refreshes in full.
+refresh=()
+if [[ "${PLAN_REFRESH:-true}" == false ]]; then
+  refresh=(-refresh=false)
+fi
+quietly terraform plan -input=false -lock-timeout=120s ${refresh[@]+"${refresh[@]}"} -out="$plan"
 text=$(summarize "$plan")
+if [[ "${PLAN_REFRESH:-true}" == false ]]; then
+  text+=$'\n'"Planned against the state without refreshing it, because the plan role cannot read this root's Kubernetes Secrets. Drift is detected when it is applied."$'\n'
+fi
 printf '%s\n' "$text"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf '## Terraform %s (%s)\n\n%s\n' "$mode" "$dir" "$text" >>"$GITHUB_STEP_SUMMARY"

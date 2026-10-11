@@ -1,0 +1,3 @@
+contract-full, TARGET=legacy
+platform ref 0dc6c37
+====================== 53 passed, 1 deselected in 10.35s =======================

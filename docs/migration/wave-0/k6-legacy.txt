@@ -1,0 +1,5 @@
+k6 baseline, target legacy (platform ref 0dc6c37)
+scenario baseline: 20 iterations/s for 30 minutes
+requests      39631
+failed        0.00 %
+duration p95  50.4 ms

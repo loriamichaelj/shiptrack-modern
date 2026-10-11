@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { ShipmentStatus } from "../api";
 import { BarChart, DonutChart, type Segment } from "../components/Charts";
@@ -10,42 +10,51 @@ import { Icon } from "../icons";
 import { isOverdue, relativeTime, STATUS_ORDER, summarize } from "../stats";
 import { useStack } from "../stack";
 
-/** Pages of up to 100 shipments are read in turn; the list is ordered oldest first by the API. */
-export const MAX_PAGES = 20;
+/**
+ * Pages of up to 100 shipments are read in turn. The API lists oldest first and has no total, so
+ * the newest shipments are on the last page: a cap that stops early drops exactly those. A batch
+ * is this many pages, and when it ends with more to read the page says so and offers the next one.
+ */
+export const MAX_PAGES = 50;
 const SHOWN_STEP = 25;
 
 interface Loaded {
   items: Shipment[];
   pages: number;
-  done: boolean;
+  /** `done`: every page is read. `paused`: a batch ended and the API has more. */
+  state: "loading" | "done" | "paused";
   error: string | null;
 }
 
-export function ShipmentsPage() {
+const EMPTY: Loaded = { items: [], pages: 0, state: "loading", error: null };
+
+export function ShipmentsPage({ pageLimit = MAX_PAGES }: { pageLimit?: number }) {
   const { setStack } = useStack();
-  const [loaded, setLoaded] = useState<Loaded>({ items: [], pages: 0, done: false, error: null });
+  const [loaded, setLoaded] = useState<Loaded>(EMPTY);
   const [status, setStatus] = useState<ShipmentStatus | "">("");
   const [carrier, setCarrier] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [text, setText] = useState("");
   const [shown, setShown] = useState(SHOWN_STEP);
-  const [reload, setReload] = useState(0);
+  const [batch, setBatch] = useState(0);
   const [now] = useState(() => Date.now());
+  // Where the next page starts, kept across batches so that "Load more" resumes.
+  const cursor = useRef<string | null>(null);
+  const pages = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
-      let cursor: string | null = null;
-      for (let page = 1; page <= MAX_PAGES; page += 1) {
+      for (let n = 0; n < pageLimit; n += 1) {
         const result: ApiResult<ShipmentPage> | null = await listShipments(
-          { cursor, limit: 100 },
+          { cursor: cursor.current, limit: 100 },
           controller.signal,
         ).catch(() => null);
         if (controller.signal.aborted) return;
         if (result === null || !result.ok) {
           setLoaded((prev) => ({
             ...prev,
-            done: true,
+            state: "paused",
             error: result !== null && !result.ok ? result.message : "Could not reach ShipTrack.",
           }));
           return;
@@ -53,16 +62,37 @@ export function ShipmentsPage() {
         if (result.stack !== null) setStack(result.stack);
         const items: Shipment[] = result.data.items;
         const next: string | null = result.data.next_cursor;
-        setLoaded((prev) => ({ items: [...prev.items, ...items], pages: page, done: next === null, error: null }));
+        pages.current += 1;
+        cursor.current = next;
+        const read = pages.current;
+        setLoaded((prev) => ({
+          items: [...prev.items, ...items],
+          pages: read,
+          state: next === null ? "done" : "loading",
+          error: null,
+        }));
         if (next === null) return;
-        cursor = next;
       }
-      setLoaded((prev) => ({ ...prev, done: true }));
+      setLoaded((prev) => ({ ...prev, state: "paused" }));
     })();
     return () => {
       controller.abort();
     };
-  }, [reload, setStack]);
+  }, [batch, pageLimit, setStack]);
+
+  function restart(): void {
+    cursor.current = null;
+    pages.current = 0;
+    setLoaded(EMPTY);
+    setBatch((n) => n + 1);
+  }
+
+  function loadMore(): void {
+    setLoaded((prev) => ({ ...prev, state: "loading", error: null }));
+    setBatch((n) => n + 1);
+  }
+
+  const complete = loaded.state === "done";
 
   const summary = useMemo(() => summarize(loaded.items, now), [loaded.items, now]);
   const carriers = useMemo(() => summary.byCarrier.map((c) => c.carrier), [summary]);
@@ -90,14 +120,7 @@ export function ShipmentsPage() {
           <Icon name="grid" size={24} /> Shipments
         </h1>
         <div className="page-actions">
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => {
-              setLoaded({ items: [], pages: 0, done: false, error: null });
-              setReload((n) => n + 1);
-            }}
-          >
+          <button type="button" className="ghost" onClick={restart}>
             <Icon name="refresh" size={16} /> Reload
           </button>
           <Link to="/shipments/new" className="button">
@@ -109,14 +132,28 @@ export function ShipmentsPage() {
       <p className="muted" role="status">
         {loaded.error !== null
           ? `Stopped after ${loaded.items.length} shipments: ${loaded.error}`
-          : loaded.done
+          : complete
             ? `${loaded.items.length} shipments loaded in ${loaded.pages} request${loaded.pages === 1 ? "" : "s"} to GET /api/v1/shipments.`
-            : `Loading… ${loaded.items.length} shipments so far (page ${loaded.pages + 1}).`}
-        {loaded.done && loaded.pages >= MAX_PAGES && " Stopped at the page limit."}
+            : loaded.state === "paused"
+              ? `Showing the oldest ${loaded.items.length} shipments (${loaded.pages} requests). The API has more, and it lists oldest first, so the newest are further on.`
+              : `Loading… ${loaded.items.length} shipments so far (page ${loaded.pages + 1}).`}
       </p>
+      {loaded.state === "paused" && (
+        <p>
+          <button type="button" onClick={loadMore}>
+            <Icon name="arrow-right" size={16} /> {loaded.error !== null ? "Try again" : `Load ${pageLimit * 100} more`}
+          </button>
+        </p>
+      )}
 
       <div className="stats">
-        <StatCard icon="package" label="Shipments" value={summary.total} tone="blue" />
+        <StatCard
+          icon="package"
+          label="Shipments"
+          value={complete ? summary.total : `${summary.total}+`}
+          hint={complete ? "all loaded" : "oldest first, more to load"}
+          tone="blue"
+        />
         <StatCard icon="truck" label="On the way" value={summary.byStatus.PICKED_UP + summary.byStatus.IN_TRANSIT + summary.byStatus.OUT_FOR_DELIVERY} tone="violet" />
         <StatCard icon="check-circle" label="Delivered" value={summary.delivered} hint={`${Math.round(summary.deliveredShare * 100)}% of loaded`} tone="green" />
         <StatCard icon="clock" label="Overdue" value={summary.overdue} hint={`${summary.breached} flagged by the SLA scan`} tone="amber" />
@@ -169,7 +206,7 @@ export function ShipmentsPage() {
         </div>
 
         {rows.length === 0 ? (
-          <p className="muted">{loaded.done ? "No shipments match." : "Waiting for the first page…"}</p>
+          <p className="muted">{complete ? "No shipments match." : "Waiting for pages…"}</p>
         ) : (
           <div className="table-wrap">
             <table>

@@ -1,7 +1,10 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { getApiCalls } from "../apiLog";
+import { MemoryRouter } from "react-router";
+import { ShipmentsPage } from "../pages/ShipmentsPage";
+import { StackProvider } from "../stack";
 import { jsonResponse, renderApp, stubFetch, trackView, TRACKING_NUMBER } from "./helpers";
 
 const SID = "11111111-1111-1111-1111-111111111111";
@@ -63,6 +66,38 @@ describe("shipments page", () => {
     renderApp("/shipments");
     expect(await screen.findByText(/2 shipments loaded in 2 requests/)).toBeVisible();
     expect(String(lastCall(fetchMock)[0])).toContain("cursor=abc");
+  });
+
+  it("does not stop silently at a page cap: it says so and resumes from the cursor", async () => {
+    const page = (n: number, next: string | null) =>
+      jsonResponse({
+        items: [shipment({ id: `00000000-0000-0000-0000-00000000000${n}`, tracking_number: `MF000000000${n}` })],
+        next_cursor: next,
+      });
+    // Two pages to a batch: pages 1 and 2 pause, then "Load more" reads page 3, the last.
+    const fetchMock = stubFetch(page(1, "c1"), page(2, "c2"), page(3, null));
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/shipments"]}>
+        <StackProvider>
+          <ShipmentsPage pageLimit={2} />
+        </StackProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Showing the oldest 2 shipments/)).toBeVisible();
+    expect(screen.getByText("2+")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await user.click(screen.getByRole("button", { name: /Load 200 more/ }));
+    expect(await screen.findByText(/3 shipments loaded in 3 requests/)).toBeVisible();
+    // It continued from the second page's cursor, not from the start.
+    expect(String(lastCall(fetchMock)[0])).toContain("cursor=c2");
+    // The newest shipment, which a cap would have dropped, is in the list.
+    expect(screen.getByRole("link", { name: "MF0000000003" })).toBeVisible();
+    // The tile no longer carries a "+": everything is loaded.
+    expect(screen.getByText("all loaded")).toBeVisible();
+    expect(screen.queryByText("2+")).not.toBeInTheDocument();
   });
 
   it("says why it stopped when the API fails", async () => {

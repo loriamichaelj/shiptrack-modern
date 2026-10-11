@@ -25,6 +25,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0019 | `rollout-sampler-during-the-helm-wait` | Accepted |
 | 0020 | `waves-gated-by-evidence-not-durations` | Accepted |
 | 0021 | `accepted-node-image-findings-until-rebuilt-ami` | Accepted |
+| 0022 | `event-route-latency-allowance` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -287,3 +288,12 @@ Conditions:
 
 **Consequences:** Wave 1 can start with a failing `security-findings.yml`, which keeps exiting 1 while the findings exist; the wave records say so, and the table is the evidence that nothing outside this list appeared. What the nodes expose is unchanged by this decision: they are in the platform's private application subnets, require IMDSv2 with a hop limit of 1, and carry the workload boundary on their role. The risk accepted is that a Go-library vulnerability in a node binary (`kubelet`, `containerd` or the node tooling) is exploitable on a node before AWS ships a rebuilt image; no traffic reaches modern until wave 1, and then only through the ALB to pods. The exception does not weaken the gate for the application images, which are what the design's "0 fixable CRITICAL/HIGH in deployed images" is about.
 
+## ADR-0022: event-route-latency-allowance
+
+**Status:** Accepted
+
+**Context:** Wave 2, step 2d put every write on modern and the target-group G3 read 1.40 against 1.2 (platform ADR-0031). `POST /events` waits for an SQS send before it answers `202` (REM-06), which is the durability the migration was for; the same-runner run has it at 36.9 ms against 13.4 ms at p95, 23.5 ms more, and every read route within 1.2.
+
+**Decision:** The event route is allowed a p95 of legacy's plus 50 ms (platform ADR-0031). Reducing the gap is a follow-up and does not block the waves.
+
+**Consequences:** Every wave record states G3 per route. A gap over 50 ms on the event route, or over 1.2 times on another route, is a failed G3. Candidates for narrowing it: reuse of the SQS client and its connection, and the region-local endpoint; neither has been measured.

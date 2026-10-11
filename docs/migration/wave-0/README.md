@@ -29,9 +29,10 @@ compare against. Procedure: platform
 
 ## Known before wave 1
 
-- **G3 would fail.** Modern's target-side p95 is 18.1 ms against legacy's 14.2 ms at the same load,
-  1.27 times, over the 1.2 limit. The absolute gap is 4 ms and k6 sees 2 ms from outside. Cause not
-  yet investigated; see [`gates-baseline.md`](gates-baseline.md).
+- **G3 is explained, and is not expected to fail in wave 1.** The aggregate 1.27 comes from one
+  route: `POST /events` waits for SQS before it answers (REM-06), 1.15 times legacy at p50 and
+  1.51 at p95; track, create and the UI are within 4%. Wave 1 moves only track and the UI. The
+  event route moves in wave 2. See [`gates-baseline.md`](gates-baseline.md).
 - **The node findings need a rebuilt node image.** [`findings.md`](findings.md) has the table.
 - The two baselines ran on different platform commits (legacy on `0dc6c37`, modern on `1685ed1`);
   the k6 scenario did not change between them.

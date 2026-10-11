@@ -115,12 +115,13 @@ resource "aws_cloudwatch_metric_alarm" "pod_restarts" {
   }
 }
 
-# The SLA scan logs sla_scan_completed after each run. The CronJob stays suspended until Wave 3, so
-# the alarm is created with its actions off and is turned on then.
+# The SLA scan logs sla_scan_completed after each run. The application log group holds each
+# container line wrapped by the log shipper, with the application's own JSON inside a string field,
+# so a JSON pattern on $.event never matches: the filter looks for the text instead.
 resource "aws_cloudwatch_log_metric_filter" "sla_scan" {
   name           = "shiptrack-modern-sla-scan-completed"
   log_group_name = aws_cloudwatch_log_group.insights["application"].name
-  pattern        = "{ $.event = \"sla_scan_completed\" }"
+  pattern        = "\"sla_scan_completed\""
 
   metric_transformation {
     name          = "SlaScanCompleted"

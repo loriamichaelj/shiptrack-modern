@@ -56,6 +56,7 @@ jobs:
         env:
           TF_DIR: terraform/cluster
           TF_STATE_KEY: modern/cluster/dev.tfstate
+          PRINT_OUTPUTS: addon_versions
         run: .github/scripts/terraform-ci.sh apply
       - name: Apply the addons root
         env:

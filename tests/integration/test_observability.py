@@ -56,12 +56,6 @@ def test_the_stack_header_is_on_every_response(client: TestClient) -> None:
         assert response.headers["x-shiptrack-stack"] == "modern"
 
 
-def test_the_stack_is_also_in_server_timing_for_the_ui(client: TestClient) -> None:
-    # The UI reads it from the document's navigation entry, so it is on every response.
-    for response in (client.get("/"), client.get("/api/v1/track/MF0000000000")):
-        assert response.headers["server-timing"] == 'stack;desc="modern"'
-
-
 def test_an_unhandled_error_still_carries_the_headers(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

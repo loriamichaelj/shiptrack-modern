@@ -116,8 +116,6 @@ class RequestContextMiddleware:
                 out = MutableHeaders(scope=message)
                 out["X-Request-Id"] = request_id
                 out["X-ShipTrack-Stack"] = "modern"
-                # Read by the UI from the navigation entry, so the badge is right on first paint.
-                out["Server-Timing"] = 'stack;desc="modern"'
                 for name, value in self._security.items():
                     out[name] = value
             await send(message)

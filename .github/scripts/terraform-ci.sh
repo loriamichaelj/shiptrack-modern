@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Plan or apply one Terraform root. Run by terraform-pr.yml and terraform-apply.yml.
-# Usage: .github/scripts/terraform-ci.sh plan|apply
+# Plan or apply one Terraform root, or print some of its outputs. Run by terraform-pr.yml,
+# terraform-apply.yml, and terraform-outputs.yml.
+# Usage: .github/scripts/terraform-ci.sh plan|apply|outputs
 #
 # The state bucket name contains the account ID, so the backend is configured at init time instead
 # of being committed. A failed step prints Terraform's output with the account and resource IDs
@@ -14,11 +15,14 @@
 #                     root reads what the cluster root publishes, so before the cluster is applied
 #                     there is nothing to plan against.
 #   SUMMARY_FILE      where `plan` writes the address-and-action summary as Markdown (optional)
+#   PRINT_OUTPUTS     space-separated output names to print as HCL after an apply, and the outputs
+#                     to print in `outputs` mode (required there). Only for outputs that hold no
+#                     identifiers, such as add-on versions: the log of a public repository is public.
 #   TF_VAR_*          input variables
 set -euo pipefail
 
-mode=${1:?usage: terraform-ci.sh plan|apply}
-[[ "$mode" == plan || "$mode" == apply ]] || { echo "unknown mode: $mode" >&2; exit 2; }
+mode=${1:?usage: terraform-ci.sh plan|apply|outputs}
+[[ "$mode" == plan || "$mode" == apply || "$mode" == outputs ]] || { echo "unknown mode: $mode" >&2; exit 2; }
 : "${AWS_REGION:?AWS_REGION is required}"
 : "${TF_DIR:?TF_DIR is required}"
 : "${TF_STATE_KEY:?TF_STATE_KEY is required}"
@@ -79,6 +83,37 @@ quietly terraform init -input=false \
   -backend-config="region=${AWS_REGION}" \
   -backend-config="use_lockfile=true"
 
+# Print the named outputs as HCL, ready to paste into terraform.tfvars. The account ID is masked as
+# a last resort; the outputs listed in PRINT_OUTPUTS should not hold identifiers anyway.
+print_outputs() {
+  local name value block
+  for name in ${PRINT_OUTPUTS:-}; do
+    if ! value=$(terraform output -json "$name" 2>/dev/null); then
+      echo "::warning::The root has no output named ${name}."
+      continue
+    fi
+    block=$(jq -r --arg n "$name" '
+        if type == "object" then
+          "\($n) = {\n"
+          + (to_entries | sort_by(.key) | map("  \(.key | @json) = \(.value | @json)") | join("\n"))
+          + "\n}"
+        else "\($n) = \(. | @json)" end' <<<"$value" | sed -E "s/${account}/***/g")
+    printf '%s\n' "$block"
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      # The backticks are Markdown, not command substitution.
+      # shellcheck disable=SC2016
+      printf '### Output `%s`\n\n```hcl\n%s\n```\n' "$name" "$block" >>"$GITHUB_STEP_SUMMARY"
+    fi
+  done
+}
+
+# Read-only: no plan, no lock, nothing applied.
+if [[ "$mode" == outputs ]]; then
+  : "${PRINT_OUTPUTS:?PRINT_OUTPUTS is required in outputs mode}"
+  print_outputs
+  exit 0
+fi
+
 # The plan file stays on the runner: it is never uploaded, and apply makes its own in the same job.
 plan=$(mktemp -u)
 trap 'rm -f "$plan"' EXIT
@@ -95,3 +130,4 @@ fi
 
 quietly terraform apply -input=false "$plan"
 echo "Apply complete."
+print_outputs

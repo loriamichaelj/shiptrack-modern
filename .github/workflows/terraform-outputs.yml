@@ -1,0 +1,45 @@
+name: terraform-outputs
+
+# Prints outputs of the cluster root that are safe in a public log, as HCL ready to paste into
+# terraform.tfvars. Today that is `addon_versions`: what each EKS add-on resolved to when it was
+# first created (ADR-0013), so it can be pinned. Read-only: it uses the plan role, makes no plan,
+# takes no lock, and applies nothing, so it needs no approval.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.16.4"
+
+jobs:
+  outputs:
+    # The plan role trusts this repository's `dev` branch, not other refs.
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Print the add-on versions
+        env:
+          TF_DIR: terraform/cluster
+          TF_STATE_KEY: modern/cluster/dev.tfstate
+          PRINT_OUTPUTS: addon_versions
+        run: .github/scripts/terraform-ci.sh outputs

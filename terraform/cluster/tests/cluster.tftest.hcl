@@ -313,10 +313,10 @@ run "the_alarms_are_wired_to_the_right_severities" {
 
   assert {
     condition = alltrue([
-      aws_cloudwatch_metric_alarm.sla_scan_heartbeat.actions_enabled == false,
+      aws_cloudwatch_metric_alarm.sla_scan_heartbeat.actions_enabled == true,
       aws_cloudwatch_metric_alarm.sla_scan_heartbeat.treat_missing_data == "breaching",
     ])
-    error_message = "The SLA-scan heartbeat is created disabled and treats silence as a breach."
+    error_message = "The SLA-scan heartbeat pages SEV2 and treats silence as a breach."
   }
 
   assert {

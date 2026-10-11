@@ -131,9 +131,8 @@ resource "aws_cloudwatch_log_metric_filter" "sla_scan" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "sla_scan_heartbeat" {
-  #checkov:skip=CKV_AWS_319: created with actions off until the modern CronJob takes over in Wave 3 (design 8.1)
   alarm_name          = "shiptrack-modern-sla-scan-heartbeat"
-  alarm_description   = "SEV2: no SLA scan has completed in 15 minutes. Enabled when the modern CronJob takes over (Wave 3)."
+  alarm_description   = "SEV2: no SLA scan has completed in 15 minutes."
   namespace           = "ShipTrack/Modern"
   metric_name         = aws_cloudwatch_log_metric_filter.sla_scan.metric_transformation[0].name
   statistic           = "Sum"
@@ -143,7 +142,7 @@ resource "aws_cloudwatch_metric_alarm" "sla_scan_heartbeat" {
   threshold           = 1
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching"
-  actions_enabled     = false
+  actions_enabled     = true
   alarm_actions       = local.sev2
 }
 

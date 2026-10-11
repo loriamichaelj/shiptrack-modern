@@ -31,8 +31,9 @@ Legacy is kept running as a fallback and nothing is destroyed (platform ADR-0032
 
 The heartbeat alarm paged SEV2 once its actions were on, although the scan was running. Its metric
 filter matched a JSON field the log shipper's wrapper does not expose; it now matches the text
-([modern #31](https://github.com/loriamichaelj/shiptrack-modern/pull/31)). Whether the alarm clears
-is recorded below.
+([modern #31](https://github.com/loriamichaelj/shiptrack-modern/pull/31)), applied at 22:10Z. The alarm
+left ALARM: `cutover-gates` at 22:19Z reads 0 SEV2 in ALARM (run
+[38179963457](https://github.com/loriamichaelj/shiptrack-platform/actions/runs/38179963457)).
 
 ## Exit
 

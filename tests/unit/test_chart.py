@@ -145,8 +145,12 @@ def test_the_sla_scan_is_suspended_until_wave_three() -> None:
     assert live["spec"]["suspend"] is False
 
 
-def test_the_migration_job_is_a_hook_and_off_by_default() -> None:
-    assert "shiptrack-migrate" not in by_kind(render(), "Job")
+def test_the_migration_job_is_a_hook_off_in_the_chart_and_on_in_dev() -> None:
+    # The chart ships with it off; the dev environment turns it on at the schema handoff (§9.1).
+    defaults = yaml.safe_load((CHART / "values.yaml").read_text())
+    assert defaults["migrations"]["enabled"] is False
+    assert "shiptrack-migrate" in by_kind(render(), "Job")
+    assert "shiptrack-migrate" not in by_kind(render("--set", "migrations.enabled=false"), "Job")
     docs = render("--set", "migrations.enabled=true")
     job = by_kind(docs, "Job")["shiptrack-migrate"]
     annotations = job["metadata"]["annotations"]

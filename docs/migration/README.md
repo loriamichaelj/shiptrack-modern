@@ -44,10 +44,10 @@ Copy to `wave-N/step-<n>.md`.
 - Decision: go | hold | roll back
 - Approved by: <person>
 - Pull request: <link>
-- Soak window: <start> to <end> (30 minutes)
-- Load during the soak: k6-baseline, target none, run <link>
+- Evidence window: <start> to <end>, with the request count of each target group
+- Load during the window: k6-baseline, target none, run <link>
 - Gates (cutover-gates run <link>): G2 <result>, G3 <result>, G4 <result>, G5 <result or n/a>
 - G1 (validation.yml run <link>) and G6: <result>
-- Alarms fired during the soak: <none | names>
+- Alarms fired during the window: <none | names>
 - Notes: <anything a later reader needs>
 ```

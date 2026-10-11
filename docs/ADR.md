@@ -24,6 +24,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0018 | `addons-pr-plan-without-refresh` | Accepted |
 | 0019 | `rollout-sampler-during-the-helm-wait` | Accepted |
 | 0020 | `waves-gated-by-evidence-not-durations` | Accepted |
+| 0021 | `accepted-node-image-findings-until-rebuilt-ami` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -261,4 +262,28 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 - Entry and exit criteria that are not durations are unchanged: G6, G-POD, no fixable CRITICAL or HIGH in modern, zero lost events in the simulator ledger, and the contract migration as the point of no return.
 
 **Consequences:** See platform ADR-0030. The two safety nets that were time-based are gone, so a fault that takes hours to appear is caught by an alarm, not by a step that waited for it. Before the contract migration the rollback is `rollback-cutover.yml` and then the flag reversal in §9.1; after it, forward-fix only.
+
+## ADR-0021: accepted-node-image-findings-until-rebuilt-ami
+
+**Status:** Accepted, until 2026-11-10
+
+**Context:** Wave 0's exit criterion is no fixable CRITICAL or HIGH Inspector finding in modern (§9.2, platform ADR-0029). Run 38159470275 on platform `8472048` found 40: 20 distinct findings, each on both of the two EKS nodes of the `system` node group. All are Go modules compiled into programs the EKS-optimized AL2023 AMI ships (the Go standard library, `x/net`, `x/text`, `x/crypto`, `grpc`, `otel`, the etcd client), so they are fixed when AWS rebuilds those programs and publishes a new AMI, not by anything in this repository. The newest AMI release when the nodes were created was `v20261003` (published 2026-10-08), and the nodes most likely run it. The application images in the `shiptrack/` repository have no fixable finding. Waiting for a rebuilt AMI has no known date.
+
+**Decision:** The owner accepts the 20 findings below on the node image, for the nodes of the `shiptrack` cluster only, until **2026-11-10**, so that cutover wave 1 can start.
+
+| Severity | Finding |
+|---|---|
+| CRITICAL | CVE-2026-78663 |
+| HIGH | CVE-2026-39883, CVE-2026-46600, CVE-2026-56851, CVE-2026-56852, CVE-2026-56854, CVE-2026-56855, CVE-2026-56866, CVE-2026-73500, CVE-2026-78659, CVE-2026-78660, CVE-2026-78662, CVE-2026-78667, CVE-2026-78669, CVE-2026-84304, CVE-2026-84445, CVE-2026-94439, CVE-2026-94440, CVE-2026-97031, GHSA-hrxh-6v49-42gf |
+
+What is not accepted, and still fails the criterion:
+- Any fixable CRITICAL or HIGH finding in an application image, or on a resource other than the two nodes.
+- Any finding on the nodes whose title is not in the list above. Each wave step compares the `security-findings.yml` table with this list.
+
+Conditions:
+- **Re-check on every EKS AMI release.** When a release newer than `v20261003` is published, the node group is rolled onto it by a `terraform-apply` and `security-findings.yml` is re-run. The acceptance ends the first time the table has none of these findings, and the register row is closed.
+- **It expires on 2026-11-10.** After that date the criterion applies in full again. Extending it takes a new ADR that names the findings still open.
+- **No other change to the node group** is made under this acceptance.
+
+**Consequences:** Wave 1 can start with a failing `security-findings.yml`, which keeps exiting 1 while the findings exist; the wave records say so, and the table is the evidence that nothing outside this list appeared. What the nodes expose is unchanged by this decision: they are in the platform's private application subnets, require IMDSv2 with a hop limit of 1, and carry the workload boundary on their role. The risk accepted is that a Go-library vulnerability in a node binary (`kubelet`, `containerd` or the node tooling) is exploitable on a node before AWS ships a rebuilt image; no traffic reaches modern until wave 1, and then only through the ALB to pods. The exception does not weaken the gate for the application images, which are what the design's "0 fixable CRITICAL/HIGH in deployed images" is about.
 

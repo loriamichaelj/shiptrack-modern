@@ -1,0 +1,5 @@
+k6 baseline, target modern (platform ref 1685ed1)
+scenario baseline: 20 iterations/s for 30 minutes
+requests      39470
+failed        0.00 %
+duration p95  52.4 ms

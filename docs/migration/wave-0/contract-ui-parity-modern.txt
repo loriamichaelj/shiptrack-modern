@@ -1,0 +1,3 @@
+contract-ui-parity, TARGET=modern (gate G6)
+platform ref 0dc6c37
+======================= 1 passed, 53 deselected in 0.43s =======================

@@ -21,3 +21,17 @@ Procedure: platform
 | [2a](step-2a.md) | legacy 90, modern 10 | Go |
 | [2b](step-2b.md) | legacy 75, modern 25 | Go |
 | [2c](step-2c.md) | legacy 50, modern 50 | Go |
+| [2d](step-2d.md) | legacy 0, modern 100 | Go |
+
+## Exit
+
+| Criterion | Result |
+|---|---|
+| G1 to G5 pass at each step | Pass at 2a, 2b, 2c and 2d, with G3 judged per route from 2d (platform ADR-0031) |
+| DLQ = 0 | Yes: both DLQs 0 at every step |
+| Simulator ledger shows 0 lost events for modern-routed traffic | Yes: 402 of 402 pinned to modern; 200 of 200 at 100% modern. The one event missing from the mixed run at 50% is most likely legacy's (AP-06), see step 2c |
+| No `pod_not_migrated` for a POD older than 5 minutes | Yes: G-POD 0 at every step |
+
+Wave 2 is complete: modern serves every request. Legacy is running and serves no traffic. Next:
+handoff, then wave 3.
+

@@ -25,7 +25,8 @@ function remember(trackingNumber: string): void {
 }
 
 const FEATURES: { to: string; icon: IconName; title: string; text: string }[] = [
-  { to: "/shipments", icon: "grid", title: "Shipments", text: "Browse every shipment with live counts, charts, and filters." },
+  { to: "/live", icon: "activity", title: "Live traffic", text: "Watch synthetic traffic move through the API in real time." },
+  { to: "/shipments", icon: "grid", title: "Browse", text: "Every shipment, with counts, charts, and filters." },
   { to: "/shipments/new", icon: "plus", title: "New shipment", text: "Create a shipment and watch the API answer." },
   { to: "/system", icon: "activity", title: "System", text: "Readiness, the stack serving you, and an API explorer." },
 ];

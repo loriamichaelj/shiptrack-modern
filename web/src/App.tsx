@@ -3,6 +3,7 @@ import { Link, NavLink, Route, Routes } from "react-router";
 import { ApiInspector } from "./components/ApiInspector";
 import { StackBadge } from "./components/StackBadge";
 import { Icon } from "./icons";
+import { LivePage } from "./pages/LivePage";
 import { NewShipmentPage } from "./pages/NewShipmentPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { SearchPage } from "./pages/SearchPage";
@@ -23,8 +24,9 @@ export function App() {
             ShipTrack
           </Link>
           <nav className="nav" aria-label="Main">
+            <NavLink to="/live">Live</NavLink>
             <NavLink to="/" end>Track</NavLink>
-            <NavLink to="/shipments" end>Shipments</NavLink>
+            <NavLink to="/shipments" end>Browse</NavLink>
             <NavLink to="/shipments/new">New shipment</NavLink>
             <NavLink to="/system">System</NavLink>
           </nav>
@@ -42,6 +44,7 @@ export function App() {
             <Routes>
               <Route path="/" element={<SearchPage />} />
               <Route path="/track/:trackingNumber" element={<TrackPage />} />
+              <Route path="/live" element={<LivePage />} />
               <Route path="/shipments" element={<ShipmentsPage />} />
               <Route path="/shipments/new" element={<NewShipmentPage />} />
               <Route path="/shipments/:id" element={<ShipmentDetailPage />} />

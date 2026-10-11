@@ -28,6 +28,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0022 | `event-route-latency-allowance` | Accepted |
 | 0023 | `contract-migration-not-taken` | Accepted |
 | 0024 | `modern-ui-is-its-own` | Accepted |
+| 0025 | `synthetic-traffic-from-the-browser` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -323,3 +324,17 @@ Conditions:
 - The new UI ships as one release and one deploy.
 
 **Consequences:** The two UIs now differ, so opening both shows modern's progress against legacy's original. The contract suite no longer asserts parity; it still asserts that `/ui/` serves the shell and its assets with the right headers on whichever stack it addresses. A browser sticky to legacy sees legacy's UI and one on modern sees modern's, which is the intent while legacy is only a fallback. The UI creates test data when someone uses the create, event, and proof-of-delivery forms; it is not a read-only view.
+
+## ADR-0025: synthetic-traffic-from-the-browser
+
+**Status:** Accepted
+
+**Context:** The owner wanted to watch data moving live through the API, driven by synthetic traffic, instead of a static dashboard. Synthetic load already exists as CI-run tools (the k6 baseline and the carrier simulator), which run from a GitHub runner and print a summary afterwards. Neither can be watched while it runs, and the contract is frozen, so there is no server-side feed to subscribe to.
+
+**Decision:**
+- The live page generates the traffic itself, from the browser, through the same public endpoints as any client: create a shipment, send tracking events with an `Idempotency-Key` (some are sent twice), and read the track view. It watches the result of its own calls.
+- It uses the carrier `ZZTEST`, which the platform's tests already use for data that is not real.
+- It is bounded: 1 to 20 requests a second, 8 in flight, 120 shipments tracked, an automatic stop after 15 minutes, and a stop when the page is left.
+- No endpoint, header, or field is added.
+
+**Consequences:** It writes real rows to the shared database, which stay: nothing deletes them, and they are isolated only by the carrier code. The numbers are what this browser sees, so latency includes its distance to the load balancer; the apply lag (a `202` to the shipment showing the event) is measured by polling, to a resolution of a few hundred milliseconds. It shows only its own traffic, not other clients'. Throughput is limited by one browser; the k6 baseline remains the way to load the system.

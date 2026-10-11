@@ -39,7 +39,7 @@ helm template shiptrack . -f ci-values.yaml -f values-dev.yaml \
 
 ## Deploying
 
-`deploy.yml` runs, with the approval of the `dev` environment:
+`deploy-app.yml` runs, with the approval of the `dev` environment:
 
 ```sh
 scripts/render-values.sh generated-values.yaml

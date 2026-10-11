@@ -1,4 +1,4 @@
-name: release
+name: release-image
 
 # Builds the image for each architecture on a native runner (no QEMU), pushes the per-architecture
 # digests to ECR, checks that both images carry the same UI assets, merges them into one multi-arch
@@ -177,7 +177,7 @@ jobs:
           digest=$(docker buildx imagetools inspect "${REPO}:sha-${GITHUB_SHA}" --format '{{.Manifest.Digest}}')
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "could not read the digest of sha-${GITHUB_SHA}" >&2; exit 1; }
           echo "digest=$digest" >>"$GITHUB_OUTPUT"
-          # deploy.yml has no ECR access, so it reads the digest from this artifact.
+          # deploy-app.yml has no ECR access, so it reads the digest from this artifact.
           printf '%s\n' "$digest" >"$RUNNER_TEMP/digest.txt"
           {
             echo "### Image"

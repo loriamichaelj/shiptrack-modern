@@ -1,4 +1,4 @@
-name: ci
+name: ci-checks
 
 # Every pull request runs these six jobs in parallel; all of them are required checks. None needs AWS
 # access, so they also run for pull requests from forks. Findings upload to code scanning for pull

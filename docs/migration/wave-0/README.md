@@ -41,7 +41,7 @@ compare against. Procedure: platform
 
 Go to wave 1, with one accepted exception. The 20 node-image findings are accepted until 2026-11-10
 by [ADR-0021](../../ADR.md#adr-0021-accepted-node-image-findings-until-rebuilt-ami); each wave step
-compares the `security-findings.yml` table with that list, and a finding outside it, or any fixable
+compares the `check-security-findings.yml` table with that list, and a finding outside it, or any fixable
 finding in an application image, stops the step. Two checks are not in this folder: the rollback
-rehearsal (platform `rollback-cutover.yml` with `dry_run`) and the dashboard, which is a console
+rehearsal (platform `ops-rollback-cutover.yml` with `dry_run`) and the dashboard, which is a console
 look. Each is recorded in the step record that first depends on it.

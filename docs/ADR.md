@@ -72,7 +72,7 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 **Decision:** Every container sets a CPU request and a memory limit, and no CPU limit. Requests drive scheduling and the HPA (60% of the request). Memory has a limit because memory is not compressible: a pod that leaks is killed instead of taking the node down with it.
 
-**Consequences:** A busy pod can use idle CPU on its node, and a noisy neighbour is bounded only by requests and the scheduler. Checkov rule CKV_K8S_11 ("CPU limits should be set") is skipped for the rendered chart in `ci.yml` for this reason, and `tests/unit/test_chart.py` fails if a CPU limit appears.
+**Consequences:** A busy pod can use idle CPU on its node, and a noisy neighbour is bounded only by requests and the scheduler. Checkov rule CKV_K8S_11 ("CPU limits should be set") is skipped for the rendered chart in `ci-checks.yml` for this reason, and `tests/unit/test_chart.py` fails if a CPU limit appears.
 
 ## ADR-0004: pod-identity-token-automount
 
@@ -190,7 +190,7 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 **Consequences:** The first apply is not reproducible by version, and the second plan shows no add-on drift only after the pins are committed. A later upgrade is a pull request that changes one value.
 
-**Applied:** The first apply resolved the six add-ons, `terraform-outputs.yml` printed them, and they are pinned in `terraform/cluster/terraform.tfvars`. The apply role's next plan showed no add-on change. `terraform-ci.sh` quiets Terraform's output, so the versions are printed by an `outputs` mode of the same script, and by every apply, rather than read from a log.
+**Applied:** The first apply resolved the six add-ons, `check-terraform-outputs.yml` printed them, and they are pinned in `terraform/cluster/terraform.tfvars`. The apply role's next plan showed no add-on change. `terraform-ci.sh` quiets Terraform's output, so the versions are printed by an `outputs` mode of the same script, and by every apply, rather than read from a log.
 
 ## ADR-0014: pod-restart-alarm-source
 
@@ -238,7 +238,7 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 **Context:** Once the addons root had state, every pull request plan of it failed. The plan role reaches the cluster through `AmazonEKSViewPolicy`, which covers neither RBAC roles and role bindings nor Secrets. Refreshing `kubernetes_role_v1.deployer` was forbidden, and because Helm keeps a release as a Secret, the Helm provider could not see the existing releases and planned to create all three again.
 
-**Decision:** `terraform-pr.yml` plans the addons root with `PLAN_REFRESH=false`, which `terraform-ci.sh` turns into `-refresh=false`, and the plan summary says so. The cluster root is planned with a refresh, since the plan role can read everything it manages. The alternative, `AmazonEKSAdminViewPolicy`, lets a pull request triggered role read every Kubernetes Secret, including Helm release values.
+**Decision:** `ci-terraform.yml` plans the addons root with `PLAN_REFRESH=false`, which `terraform-ci.sh` turns into `-refresh=false`, and the plan summary says so. The cluster root is planned with a refresh, since the plan role can read everything it manages. The alternative, `AmazonEKSAdminViewPolicy`, lets a pull request triggered role read every Kubernetes Secret, including Helm release values.
 
 **Consequences:** A pull request plan of the addons root shows what the change would do but not drift between state and the cluster; the apply job refreshes in full with the apply role. The plan role also shows a diff of the EKS KMS key policy that the apply role does not: the EKS module makes the identity that runs Terraform the key administrator, so it is a difference between roles and not real drift.
 
@@ -246,7 +246,7 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 **Status:** Accepted
 
-**Context:** `helm upgrade --atomic` uninstalls the release when the wait times out, and the pods, events, and logs go with it. `deploy.yml` also sends Helm's output to `/dev/null`, so the first failed deploy left nothing that said why the Deployments never became Ready.
+**Context:** `helm upgrade --atomic` uninstalls the release when the wait times out, and the pods, events, and logs go with it. `deploy-app.yml` also sends Helm's output to `/dev/null`, so the first failed deploy left nothing that said why the Deployments never became Ready.
 
 **Decision:** The `Upgrade` step starts `scripts/sample-rollout.sh` in the background before `helm upgrade` and kills it on exit. Every 30 seconds it prints the pods, the target group bindings, the newest events, and, for up to four pods that are not Ready, their conditions, container states, and last 15 log lines. It is read-only, within what the deploy role's namespace Role already allows, and its output is masked for account IDs, ARNs, node names, and instance IDs because the log is public.
 
@@ -263,7 +263,7 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 - The handoff starts when wave 2 is at 100% with G1 to G5 passing. Legacy is destroyed once wave 3's checks are verified.
 - Entry and exit criteria that are not durations are unchanged: G6, G-POD, no fixable CRITICAL or HIGH in modern, zero lost events in the simulator ledger, and the contract migration as the point of no return.
 
-**Consequences:** See platform ADR-0030. The two safety nets that were time-based are gone, so a fault that takes hours to appear is caught by an alarm, not by a step that waited for it. Before the contract migration the rollback is `rollback-cutover.yml` and then the flag reversal in §9.1; after it, forward-fix only.
+**Consequences:** See platform ADR-0030. The two safety nets that were time-based are gone, so a fault that takes hours to appear is caught by an alarm, not by a step that waited for it. Before the contract migration the rollback is `ops-rollback-cutover.yml` and then the flag reversal in §9.1; after it, forward-fix only.
 
 ## ADR-0021: accepted-node-image-findings-until-rebuilt-ami
 
@@ -280,14 +280,14 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 What is not accepted, and still fails the criterion:
 - Any fixable CRITICAL or HIGH finding in an application image, or on a resource other than the two nodes.
-- Any finding on the nodes whose title is not in the list above. Each wave step compares the `security-findings.yml` table with this list.
+- Any finding on the nodes whose title is not in the list above. Each wave step compares the `check-security-findings.yml` table with this list.
 
 Conditions:
-- **Re-check on every EKS AMI release.** When a release newer than `v20261003` is published, the node group is rolled onto it by a `terraform-apply` and `security-findings.yml` is re-run. The acceptance ends the first time the table has none of these findings, and the register row is closed.
+- **Re-check on every EKS AMI release.** When a release newer than `v20261003` is published, the node group is rolled onto it by a `apply-terraform` and `check-security-findings.yml` is re-run. The acceptance ends the first time the table has none of these findings, and the register row is closed.
 - **It expires on 2026-11-10.** After that date the criterion applies in full again. Extending it takes a new ADR that names the findings still open.
 - **No other change to the node group** is made under this acceptance.
 
-**Consequences:** Wave 1 can start with a failing `security-findings.yml`, which keeps exiting 1 while the findings exist; the wave records say so, and the table is the evidence that nothing outside this list appeared. What the nodes expose is unchanged by this decision: they are in the platform's private application subnets, require IMDSv2 with a hop limit of 1, and carry the workload boundary on their role. The risk accepted is that a Go-library vulnerability in a node binary (`kubelet`, `containerd` or the node tooling) is exploitable on a node before AWS ships a rebuilt image; no traffic reaches modern until wave 1, and then only through the ALB to pods. The exception does not weaken the gate for the application images, which are what the design's "0 fixable CRITICAL/HIGH in deployed images" is about.
+**Consequences:** Wave 1 can start with a failing `check-security-findings.yml`, which keeps exiting 1 while the findings exist; the wave records say so, and the table is the evidence that nothing outside this list appeared. What the nodes expose is unchanged by this decision: they are in the platform's private application subnets, require IMDSv2 with a hop limit of 1, and carry the workload boundary on their role. The risk accepted is that a Go-library vulnerability in a node binary (`kubelet`, `containerd` or the node tooling) is exploitable on a node before AWS ships a rebuilt image; no traffic reaches modern until wave 1, and then only through the ALB to pods. The exception does not weaken the gate for the application images, which are what the design's "0 fixable CRITICAL/HIGH in deployed images" is about.
 
 ## ADR-0022: event-route-latency-allowance
 
@@ -305,6 +305,6 @@ Conditions:
 
 **Context:** Design §9.1 ends the migration with a contract migration (modern M10): three Alembic revisions that delete duplicate `sla_alerts` and add a unique constraint on `shipment_id`. It is the point of no return for rolling back to legacy. By the time it would run, the single CronJob with its atomic `UPDATE … RETURNING` already produces one alert per breach: `evidence sla-duplicates` read `alerts=3 shipments=0 extra_alerts=0` after the `contract-sla` test (platform run 38178609695), and had never shown a duplicate. The owner asked that legacy stay a fallback.
 
-**Decision:** The contract migration is not built and not run. Legacy stays running (platform ADR-0032), and rolling back stays possible: `rollback-cutover.yml` sends traffic to legacy, and `legacy-cron.yml restore-sla` puts legacy's SLA cron back.
+**Decision:** The contract migration is not built and not run. Legacy stays running (platform ADR-0032), and rolling back stays possible: `ops-rollback-cutover.yml` sends traffic to legacy, and `ops-legacy-cron.yml restore-sla` puts legacy's SLA cron back.
 
 **Consequences:** "Exactly one alert per breach" holds because there is one scanner and the scan is one atomic statement, not because the database refuses a second row. If legacy's SLA cron is restored for a rollback, modern's CronJob has to be suspended first, or AP-09 returns: two scanners can alert twice. The unique constraint can be added later, after legacy is retired, as the same three revisions.

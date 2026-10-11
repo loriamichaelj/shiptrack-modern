@@ -55,8 +55,8 @@ serve the same build.
 | M1 Application | Done: tests, lint, types, and the platform contract suite against the compose stack |
 | M2 Image | Done: builds for amd64 and arm64, Trivy clean |
 | M3 Terraform cluster, M4 addons | Done and applied |
-| M5 Helm chart | Done; installed by `deploy.yml` |
-| M6 CI/CD | Done and in use: `terraform-apply`, `release`, and `deploy` have all run on GitHub |
+| M5 Helm chart | Done; installed by `deploy-app.yml` |
+| M6 CI/CD | Done and in use: `apply-terraform`, `release-image`, and `deploy-app` have all run on GitHub |
 | M7 Observability | Partly done. The alarms (queue age, DLQs, pod restarts, SLA scan heartbeat, availability burn rate) are applied. The SLO document, the CloudWatch golden-signals dashboard, five of the six Grafana boards, and the Log Insights queries are not written |
 | M8 and later | Not started: runbooks and game days, Karpenter and cost optimization. The contract migration (M10) is not taken (ADR-0023) |
 
@@ -117,19 +117,33 @@ the `dev` environment requires a reviewer.
 
 | Workflow | Runs | Does |
 |---|---|---|
-| `ci.yml` | pull requests | Six parallel jobs: tests with a 75% coverage gate and a dependency audit; the UI checks; gitleaks; the image build with Trivy and an SBOM; Terraform checks; Helm lint, kubeconform, and Checkov |
-| `terraform-pr.yml` | pull requests touching Terraform | A plan comment for both roots, addresses and actions only. The addons root is planned without refreshing (ADR-0018) |
-| `terraform-apply.yml` | push to `dev`, or by hand | Applies `cluster`, then `addons`, after one approval, and prints `addon_versions` |
-| `terraform-outputs.yml` | by hand | Read-only: prints `addon_versions` as HCL with the plan role. No plan, no lock, no approval |
-| `release.yml` | push to `dev` that changes the image | Builds each architecture natively, merges them, scans the pushed digest, and hands the digest on |
-| `deploy.yml` | after a release, or by hand with a digest | `helm upgrade --atomic` with a rollout sampler beside it (ADR-0019), a smoke test through the ALB with the platform contract suite, and a rollback if it fails |
+| `ci-checks.yml` | pull requests | Six parallel jobs: tests with a 75% coverage gate and a dependency audit; the UI checks; gitleaks; the image build with Trivy and an SBOM; Terraform checks; Helm lint, kubeconform, and Checkov |
+| `ci-terraform.yml` | pull requests touching Terraform | A plan comment for both roots, addresses and actions only. The addons root is planned without refreshing (ADR-0018) |
+| `apply-terraform.yml` | push to `dev`, or by hand | Applies `cluster`, then `addons`, after one approval, and prints `addon_versions` |
+| `check-terraform-outputs.yml` | by hand | Read-only: prints `addon_versions` as HCL with the plan role. No plan, no lock, no approval |
+| `release-image.yml` | push to `dev` that changes the image | Builds each architecture natively, merges them, scans the pushed digest, and hands the digest on |
+| `deploy-app.yml` | after a release, or by hand with a digest | `helm upgrade --atomic` with a rollout sampler beside it (ADR-0019), a smoke test through the ALB with the platform contract suite, and a rollback if it fails |
 
-First deploy, in order: `terraform-apply`, then `release`, then `deploy` (it follows the release by
+First deploy, in order: `apply-terraform`, then `release-image`, then `deploy-app` (it follows the release by
 itself). The platform has already registered `tg-modern` with the ALB at weight 0: the cutover moves
 the weights, and that is a platform pull request (platform `docs/runbooks/cutover.md`, once written).
 
-A `release` that runs before the cluster root has created the ECR repository fails at the push, and
-`deploy` then skips itself. Run `release` again by hand after the first apply.
+A `release-image` run before the cluster root has created the ECR repository fails at the push, and
+`deploy-app` then skips itself. Run `release-image` again by hand after the first apply.
+
+### Workflow names
+
+A workflow file is `<category>-<what>.yml`, and its `name:` is the file name without `.yml`, so the
+Actions list sorts by what a workflow does.
+
+| Prefix | Does | Runs on | Needs approval |
+|---|---|---|---|
+| `ci-` | Checks a pull request. Changes nothing in AWS | pull request | No |
+| `apply-` | Applies Terraform | push to `dev`, or by hand | `dev` environment |
+| `release-` | Builds an artifact and pushes it | push to `dev`, or by hand | No |
+| `deploy-` | Puts a release on the running stack | after a release, or by hand | `dev` environment |
+| `ops-` | One operation on a running system: rollback, unlock, cron, database | by hand | `dev` environment |
+| `check-` | Reads state or judges evidence. Changes nothing | by hand, or a schedule | No |
 
 ## Rules that apply here
 

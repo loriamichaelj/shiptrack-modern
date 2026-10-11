@@ -1,4 +1,4 @@
-name: terraform-outputs
+name: check-terraform-outputs
 
 # Prints outputs of the cluster root that are safe in a public log, as HCL ready to paste into
 # terraform.tfvars. Today that is `addon_versions`: what each EKS add-on resolved to when it was

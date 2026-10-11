@@ -9,4 +9,4 @@
 - G1: contract-smoke against modern, run [38170163689](https://github.com/loriamichaelj/shiptrack-platform/actions/runs/38170163689), 8 passed. G6: unchanged since wave 0
 - G-POD: `POD_GATE file_uris_older_than_5_minutes=0` at 19:59Z (legacy evidence run [38170154781](https://github.com/loriamichaelj/shiptrack-legacy/actions/runs/38170154781))
 - Alarms fired during the window: none. The SLA scan heartbeat is in ALARM by design with its actions off until wave 3
-- Notes: the simulator ledger check is not yet run; it needs `simulate.yml` with `target` set to `none`, which was added after this step (legacy #16), and runs at step 2c.
+- Notes: the simulator ledger check is not yet run; it needs `ops-simulate-events.yml` with `target` set to `none`, which was added after this step (legacy #16), and runs at step 2c.

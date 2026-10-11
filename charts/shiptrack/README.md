@@ -25,7 +25,7 @@ not `sha256:<64 hex>`. The image is always referenced by digest.
 |---|---|---|
 | `slaScan.suspend` | `true` | The SLA scan CronJob stays suspended until the legacy cron is removed (Wave 3) |
 | `migrations.enabled` | `false` | Renders the pre-install and pre-upgrade migration Job. Turn on only after the schema ownership handoff (design §9.1) |
-| `serviceAccount.automountToken` | `false` | Pod Identity injects its own token; set `true` if credentials do not arrive (ADR-0004) |
+| `serviceAccount.automountToken` | `false` | Pod Identity injects its own token, so the default stays off; verified on the first deploy (ADR-0004) |
 | `faultErrorRate`, `faultReadyFail` | `"0"`, `false` | Game days only |
 
 ## Render and check locally

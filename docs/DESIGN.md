@@ -461,7 +461,7 @@ All roles: prefix `<PREFIX>-modern-`, `permissions_boundary` = the platform boun
 - `coredns`
 - `kube-proxy`
 - `eks-pod-identity-agent`
-- `amazon-cloudwatch-observability`: Container Insights enhanced observability + Fluent Bit; Pod Identity role
+- `amazon-cloudwatch-observability`: Container Insights enhanced observability + Fluent Bit; Pod Identity role; Application Signals auto monitor off (`manager.applicationSignals.autoMonitor.monitorAllServices = false`), because its injected init container fails Pod Security `restricted` (ADR-0017)
 - `metrics-server` (EKS **community** add-on: AWS validates version compatibility and supports lifecycle API operations only, not the software itself)
 
 **Managed node group `system`**
@@ -619,12 +619,13 @@ All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyi
   5. `kubectl rollout status` for each Deployment
   6. Smoke: platform contract `smoke` suite with `TARGET=modern` and `TEST_TOKEN` from `test_token_secret_arn` (public platform repo checked out at a pinned commit SHA). The suite asserts `X-ShipTrack-Stack: modern`, so a missing token cannot silently test legacy.
   7. Record a GitHub Deployment + annotation (digest, Helm revision, duration)
+- **During the upgrade:** a read-only sampler (`scripts/sample-rollout.sh`) prints pods, target group bindings, events, and the logs of any not-Ready pod every 30 s, masked, because `--atomic` removes them on failure (ADR-0019).
 - **On smoke failure:** `helm rollback shiptrack <previous-revision> --wait` and fail the job. (`--atomic` already covers failures during the upgrade itself.)
 - **Gotcha:** a pre-upgrade migration hook is **not** rolled back by `--atomic`/`helm rollback`. Schema changes must be backward compatible (§9.1).
 - **DORA evidence:** the workflow emits commit timestamp → deploy-complete timestamp to `docs/migration/dora.csv` via the job summary (manually collected), to compare against the legacy deploy duration.
 
 ### 10.4 Terraform workflows
-Same pattern as platform §6.11, as a matrix over `cluster` and `addons`. Plan PR comments follow platform §6.12 (addresses and actions only; no plan artifacts). `addons` apply runs only after `cluster` apply succeeds in the same workflow.
+Same pattern as platform §6.11, as a matrix over `cluster` and `addons`. Plan PR comments follow platform §6.12 (addresses and actions only; no plan artifacts). `addons` apply runs only after `cluster` apply succeeds in the same workflow. Pull request plans of `addons` do not refresh, because the plan role cannot read Secrets or RBAC objects (ADR-0018). `terraform-outputs.yml` is a read-only, by-hand workflow that prints `addon_versions` with the plan role, so the pins can be recorded without an apply (ADR-0013).
 
 ---
 
@@ -773,7 +774,7 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 - [x] `metrics-server` available as an EKS community add-on (confirmed)
 - [x] Native arm64 GitHub-hosted runners for public repositories (generally available since August 2025)
 - [x] KEDA `podIdentity.provider: aws` (current KEDA docs)
-- [ ] Pod Identity with `automountServiceAccountToken: false`
+- [x] Pod Identity with `automountServiceAccountToken: false` (observed on the first deploy; ADR-0004)
 - [x] AMP managed scraper Terraform resource and scrape-config schema (only `kubernetes_sd_config`, a scrape interval of 30 s or more; in `API` authentication mode the service creates the scraper's access entry itself)
 - [ ] AWS FIS actions for EKS / spot interruption
 - [ ] Container Insights enhanced observability pricing model

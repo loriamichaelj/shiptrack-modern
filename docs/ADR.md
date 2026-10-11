@@ -7,7 +7,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0001 | `fork-strategy` | Accepted; one commit per REM on `dev` amended by ADR-0016 |
 | 0002 | `db-connection-budget` | Accepted |
 | 0003 | `no-cpu-limits` | Accepted |
-| 0004 | `pod-identity-token-automount` | Planned |
+| 0004 | `pod-identity-token-automount` | Accepted |
 | 0005 | `podsync-window-acceptance` | Planned |
 | 0006 | `transactional-outbox` | Planned |
 | 0007 | `sqs-encryption` | Accepted |
@@ -20,6 +20,9 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0014 | `pod-restart-alarm-source` | Accepted |
 | 0015 | `accepted-trivy-findings-in-the-eks-module` | Accepted |
 | 0016 | `squash-merge-and-remediation-history` | Accepted |
+| 0017 | `application-signals-auto-monitor-off` | Accepted |
+| 0018 | `addons-pr-plan-without-refresh` | Accepted |
+| 0019 | `rollout-sampler-during-the-helm-wait` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -69,15 +72,15 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 ## ADR-0004: pod-identity-token-automount
 
-**Status:** Planned
+**Status:** Accepted
 
-**Records:** Result of the [VERIFY] on automountServiceAccountToken: false; written either way.
+**Records:** Result of the [VERIFY] on automountServiceAccountToken: false.
 
-**Context:** Design 7.2 turns off the default service account token for every pod. EKS Pod Identity adds its own projected token volume (audience `pods.eks.amazonaws.com`) and credential environment variables through a mutating webhook, so the default token should not be needed. The documentation does not say outright that the webhook still acts when `automountServiceAccountToken` is false, and there is no cluster yet to test it on.
+**Context:** Design 7.2 turns off the default service account token for every pod. EKS Pod Identity adds its own projected token volume (audience `pods.eks.amazonaws.com`) and credential environment variables through a mutating webhook, so the default token should not be needed. The documentation does not say outright that the webhook still acts when `automountServiceAccountToken` is false.
 
-**Decision:** Provisional: the chart sets `automountServiceAccountToken: false` on the service accounts and pod specs, controlled by `serviceAccount.automountToken` in `values.yaml`. The first deploy decides it. If a pod has no `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` or cannot get credentials, set the value to `true`, deploy, and change this entry to say so.
+**Decision:** The chart keeps `automountServiceAccountToken: false` on the service accounts and pod specs, controlled by `serviceAccount.automountToken` in `values.yaml`. It was observed on the first successful deploy: with the value false, the API pods reached the database, whose credentials the application reads from Secrets Manager with its Pod Identity role, and `/readyz` answered 200 through the ALB. `/readyz` checks the database and the schema revision, so it cannot pass without those credentials.
 
-**Consequences:** Until the first deploy is observed this entry stays Planned. If the token is needed, every pod carries the default token, which gives it a Kubernetes API credential it never uses; the namespace has no Role that grants anything to those service accounts.
+**Consequences:** No pod carries the default Kubernetes API token it never uses. If a workload ever fails to get credentials, check the Pod Identity association first, and set `serviceAccount.automountToken` to `true` only as a last resort and record it here.
 
 ## ADR-0005: podsync-window-acceptance
 
@@ -183,6 +186,8 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 **Consequences:** The first apply is not reproducible by version, and the second plan shows no add-on drift only after the pins are committed. A later upgrade is a pull request that changes one value.
 
+**Applied:** The first apply resolved the six add-ons, `terraform-outputs.yml` printed them, and they are pinned in `terraform/cluster/terraform.tfvars`. The apply role's next plan showed no add-on change. `terraform-ci.sh` quiets Terraform's output, so the versions are printed by an `outputs` mode of the same script, and by every apply, rather than read from a log.
+
 ## ADR-0014: pod-restart-alarm-source
 
 **Status:** Accepted
@@ -212,3 +217,33 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 **Decision:** Pull requests are squash-merged. The pull request title or the squash commit subject names the REM it implements, and the squash body lists the commits it was built from, as pull request #3 does. The import commit (`4f23aea`) stays a standalone commit on `dev`, so every check in `docs/FORK.md` still holds. The individual commits remain readable on the pull request ref, `refs/pull/<n>/head`.
 
 **Consequences:** On `dev`, M1 to M6 are one commit, so one REM inside it cannot be reverted with `git revert`; it has to be undone by hand. From here, a remediation that may need reverting or reviewing alone is its own pull request. Design §15 criterion 1 (every REM appears in at least one commit message) holds because the squash bodies name them.
+
+## ADR-0017: application-signals-auto-monitor-off
+
+**Status:** Accepted
+
+**Context:** The first two deploys ran `helm upgrade --atomic --wait` for the full ten minutes and timed out. The rollout sampler (ADR-0019) showed why: no API pod ever existed. The ReplicaSet was refused with `violates PodSecurity "restricted:latest"` for a container named `opentelemetry-auto-instrumentation-java`, which the chart does not define. The CloudWatch Observability add-on injects it: from v5.0.0 Application Signals "Auto monitor" is on by default and brings every Deployment, DaemonSet, and StatefulSet that is mapped to a Kubernetes Service into scope. The API has a Service; the events worker has none and started normally. The injected container sets no `securityContext`, so the `restricted` level refuses the pod.
+
+**Decision:** The add-on's `configuration_values` set `manager.applicationSignals.autoMonitor.monitorAllServices` to `false`, which is the documented way to turn Auto monitor off, and the plan test asserts it. The design takes application metrics from Prometheus (AMP) and alarms from ALB and queue metrics, so Application Signals is not used. Excluding only the `shiptrack` namespace would also work but keeps a feature nothing here needs and bills per signal. Relaxing the namespace below `restricted` would break the security checklist.
+
+**Consequences:** Only the `manager` section is set, so the agent's own defaults and Container Insights are not overridden; Container Insights was not re-checked after the change. If Application Signals is wanted later, enable it for named workloads with `customSelector`, and give the injected containers a compliant `securityContext` or accept a lower Pod Security level for the namespace in a new ADR.
+
+## ADR-0018: addons-pr-plan-without-refresh
+
+**Status:** Accepted
+
+**Context:** Once the addons root had state, every pull request plan of it failed. The plan role reaches the cluster through `AmazonEKSViewPolicy`, which covers neither RBAC roles and role bindings nor Secrets. Refreshing `kubernetes_role_v1.deployer` was forbidden, and because Helm keeps a release as a Secret, the Helm provider could not see the existing releases and planned to create all three again.
+
+**Decision:** `terraform-pr.yml` plans the addons root with `PLAN_REFRESH=false`, which `terraform-ci.sh` turns into `-refresh=false`, and the plan summary says so. The cluster root is planned with a refresh, since the plan role can read everything it manages. The alternative, `AmazonEKSAdminViewPolicy`, lets a pull request triggered role read every Kubernetes Secret, including Helm release values.
+
+**Consequences:** A pull request plan of the addons root shows what the change would do but not drift between state and the cluster; the apply job refreshes in full with the apply role. The plan role also shows a diff of the EKS KMS key policy that the apply role does not: the EKS module makes the identity that runs Terraform the key administrator, so it is a difference between roles and not real drift.
+
+## ADR-0019: rollout-sampler-during-the-helm-wait
+
+**Status:** Accepted
+
+**Context:** `helm upgrade --atomic` uninstalls the release when the wait times out, and the pods, events, and logs go with it. `deploy.yml` also sends Helm's output to `/dev/null`, so the first failed deploy left nothing that said why the Deployments never became Ready.
+
+**Decision:** The `Upgrade` step starts `scripts/sample-rollout.sh` in the background before `helm upgrade` and kills it on exit. Every 30 seconds it prints the pods, the target group bindings, the newest events, and, for up to four pods that are not Ready, their conditions, container states, and last 15 log lines. It is read-only, within what the deploy role's namespace Role already allows, and its output is masked for account IDs, ARNs, node names, and instance IDs because the log is public.
+
+**Consequences:** A timed-out deploy leaves evidence, and `--atomic` and the rollback are unchanged. The log carries one block per sample, up to about twenty in a ten minute wait. The sampler depends on the deploy Role keeping `get` and `list` on pods, `pods/log`, events, and target group bindings.

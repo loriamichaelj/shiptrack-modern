@@ -114,6 +114,11 @@ jobs:
           DIGEST: ${{ steps.digest.outputs.digest }}
         run: |
           started=$(date +%s)
+          # An atomic upgrade that times out uninstalls the release and its pods, so look while it
+          # waits. The sampler is read-only and stops with the step.
+          scripts/sample-rollout.sh "$NAMESPACE" 30 &
+          sampler=$!
+          trap 'kill "$sampler" 2>/dev/null || true' EXIT
           helm upgrade --install "$RELEASE" charts/shiptrack -n "$NAMESPACE" \
             -f charts/shiptrack/values-dev.yaml -f generated-values.yaml \
             --set "image.digest=${DIGEST}" \

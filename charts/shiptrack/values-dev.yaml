@@ -21,4 +21,6 @@ slaScan:
   suspend: true
 
 migrations:
-  enabled: false
+  # The schema ownership handoff (design 9.1): modern owns the schema from here, and legacy's
+  # deploy skips its own migrate step (RUN_MIGRATIONS=false).
+  enabled: true

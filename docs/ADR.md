@@ -23,6 +23,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0017 | `application-signals-auto-monitor-off` | Accepted |
 | 0018 | `addons-pr-plan-without-refresh` | Accepted |
 | 0019 | `rollout-sampler-during-the-helm-wait` | Accepted |
+| 0020 | `waves-gated-by-evidence-not-durations` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -247,3 +248,17 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 **Decision:** The `Upgrade` step starts `scripts/sample-rollout.sh` in the background before `helm upgrade` and kills it on exit. Every 30 seconds it prints the pods, the target group bindings, the newest events, and, for up to four pods that are not Ready, their conditions, container states, and last 15 log lines. It is read-only, within what the deploy role's namespace Role already allows, and its output is masked for account IDs, ARNs, node names, and instance IDs because the log is public.
 
 **Consequences:** A timed-out deploy leaves evidence, and `--atomic` and the rollback are unchanged. The log carries one block per sample, up to about twenty in a ten minute wait. The sampler depends on the deploy Role keeping `get` and `list` on pods, `pods/log`, events, and target group bindings.
+
+## ADR-0020: waves-gated-by-evidence-not-durations
+
+**Status:** Accepted
+
+**Context:** Design §9 held each weight step for 30 minutes, held wave 2 at 100% for 24 hours before the schema handoff, and destroyed legacy only after 7 days. The decision, made with platform ADR-0030, is that each step is gated by what the gates measure and not by elapsed time, so that the migration can complete in one working session.
+
+**Decision:**
+- A step advances when its gates pass over an evidence window in which both target groups saw enough traffic (platform §7). Too little traffic is `NO DATA` and does not advance the step.
+- The handoff starts when wave 2 is at 100% with G1 to G5 passing. Legacy is destroyed once wave 3's checks are verified.
+- Entry and exit criteria that are not durations are unchanged: G6, G-POD, no fixable CRITICAL or HIGH in modern, zero lost events in the simulator ledger, and the contract migration as the point of no return.
+
+**Consequences:** See platform ADR-0030. The two safety nets that were time-based are gone, so a fault that takes hours to appear is caught by an alarm, not by a step that waited for it. Before the contract migration the rollback is `rollback-cutover.yml` and then the flag reversal in §9.1; after it, forward-fix only.
+

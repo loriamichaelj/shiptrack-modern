@@ -134,7 +134,7 @@ def test_keda_scales_the_workers_from_the_queues() -> None:
 
 
 def test_the_sla_scan_is_suspended_in_the_chart_and_live_in_dev() -> None:
-    # The chart ships suspended; the dev environment turns it on in wave 3, once legacy's cron is gone.
+    # The chart ships suspended; the dev environment turns it on in wave 3, after legacy's cron.
     assert yaml.safe_load((CHART / "values.yaml").read_text())["slaScan"]["suspend"] is True
     cron = by_kind(render(), "CronJob")["shiptrack-sla-scan"]["spec"]
     assert cron["suspend"] is False

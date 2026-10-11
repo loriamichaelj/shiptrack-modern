@@ -1,4 +1,5 @@
-// The UI's only API call: GET /api/v1/track/{tracking_number}, same-origin.
+// The track call, same-origin: GET /api/v1/track/{tracking_number}. The other calls are in client.ts.
+import { loggedFetch } from "./apiLog";
 
 export const TRACKING_NUMBER_PATTERN = /^MF\d{10}$/;
 export const STACK_HEADER = "X-ShipTrack-Stack";
@@ -79,7 +80,7 @@ export async function fetchTrack(
 ): Promise<TrackOutcome> {
   let response: Response;
   try {
-    response = await fetch(`/api/v1/track/${encodeURIComponent(trackingNumber)}`, {
+    response = await loggedFetch(`/api/v1/track/${encodeURIComponent(trackingNumber)}`, {
       headers: { Accept: "application/json" },
       signal,
     });

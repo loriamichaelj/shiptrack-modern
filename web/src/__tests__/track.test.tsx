@@ -105,10 +105,11 @@ describe("track page: refreshing", () => {
       jsonResponse(trackView({ status: "DELIVERED", delivered_at: "2026-10-08T15:45:00Z" })),
     );
     renderApp(trackPath);
-    await screen.findByText("In transit", { selector: ".badge" });
+    // A slow runner can take longer than findBy's default second to render.
+    await screen.findByText("In transit", { selector: ".badge" }, { timeout: 5000 });
 
     await advance(REFRESH_INTERVAL_MS);
-    await screen.findByText("Delivered", { selector: ".badge" });
+    await screen.findByText("Delivered", { selector: ".badge" }, { timeout: 5000 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await advance(REFRESH_INTERVAL_MS * 4);

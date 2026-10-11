@@ -13,8 +13,8 @@ commit that lands it.
 - The shared infrastructure it runs on, and the ALB weights that move traffic here: [`shiptrack-platform`](https://github.com/loriamichaelj/shiptrack-platform)
 
 The API contract is frozen: it behaves exactly as legacy design §3.4 says, plus a short list of
-additions (design §1). The UI source in `web/` is frozen until Wave 2 completes, so both stacks
-serve the same build.
+additions (design §1). The UI in `web/` is modern's own and is no longer held to legacy's build
+(ADR-0024); legacy keeps its original UI.
 
 ## What changed from legacy
 
@@ -35,7 +35,7 @@ serve the same build.
 |---|---|
 | `src/shiptrack/` | The application. `python -m shiptrack <api\|worker-events\|worker-notify\|sla-scan\|migrate>` selects the role |
 | `migrations/` | Alembic, the same lineage as legacy |
-| `web/` | The React UI, frozen |
+| `web/` | The React UI: search, shipments dashboard, shipment detail with events and proof of delivery, new shipment, system and API explorer |
 | `tests/` | `unit/` and `integration/` (Postgres plus a moto server for SQS, S3, Secrets Manager, and EventBridge) |
 | `Dockerfile` | Builds the UI, installs from `uv.lock`, and runs as uid 10001 |
 | `compose.yaml` | Local only: the app, Postgres, and an AWS emulator |

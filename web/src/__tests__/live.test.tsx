@@ -39,6 +39,21 @@ function fakeApi(options: { applyAfterMs?: number; failCreate?: boolean; neverAp
   return { api, accepted };
 }
 
+/** A small deterministic generator, so that a test never depends on luck. */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 2 ** 32;
+  };
+}
+
+const SEEDS = [1, 2, 3, 7, 42];
+
+function engineFor(api: TrafficApi, seed = 1): TrafficEngine {
+  return new TrafficEngine(api, { now: () => Date.now(), random: seeded(seed) });
+}
+
 describe("percentile", () => {
   it("is the value at that rank, and zero for nothing", () => {
     expect(percentile([], 95)).toBe(0);
@@ -61,9 +76,9 @@ describe("traffic engine", () => {
     });
   }
 
-  it("creates shipments, moves them through their statuses, and sees the events applied", async () => {
+  it.each(SEEDS)("creates shipments, moves them through their statuses, and sees the events applied (seed %i)", async (seed) => {
     const { api } = fakeApi();
-    const engine = new TrafficEngine(api, { now: () => Date.now(), random: Math.random });
+    const engine = engineFor(api, seed);
     engine.setRate(15);
     engine.start();
     await run(30_000);
@@ -85,7 +100,7 @@ describe("traffic engine", () => {
 
   it("keeps to the chosen rate", async () => {
     const { api } = fakeApi();
-    const engine = new TrafficEngine(api);
+    const engine = engineFor(api);
     engine.setRate(4);
     engine.start();
     await run(10_000);
@@ -96,7 +111,7 @@ describe("traffic engine", () => {
   });
 
   it("clamps the rate", () => {
-    const engine = new TrafficEngine(fakeApi().api);
+    const engine = engineFor(fakeApi().api);
     engine.setRate(500);
     expect(engine.getSnapshot().rate).toBe(20);
     engine.setRate(0);
@@ -104,7 +119,7 @@ describe("traffic engine", () => {
   });
 
   it("counts a failed call as an error and says so in the feed", async () => {
-    const engine = new TrafficEngine(fakeApi({ failCreate: true }).api);
+    const engine = engineFor(fakeApi({ failCreate: true }).api);
     engine.setRate(5);
     engine.start();
     await run(3_000);
@@ -115,9 +130,9 @@ describe("traffic engine", () => {
     expect(snap.feed[0]).toMatchObject({ kind: "error", ok: false });
   });
 
-  it("repeats an Idempotency-Key now and then and counts it as a repeat", async () => {
+  it.each(SEEDS)("repeats an Idempotency-Key now and then and counts it as a repeat (seed %i)", async (seed) => {
     const { api, accepted } = fakeApi();
-    const engine = new TrafficEngine(api);
+    const engine = engineFor(api, seed);
     engine.setRate(20);
     engine.start();
     await run(60_000);
@@ -127,8 +142,8 @@ describe("traffic engine", () => {
     expect(engine.getSnapshot().totals.duplicates).toBeGreaterThan(0);
   });
 
-  it("reports an event that is accepted and never shown, instead of waiting for it", async () => {
-    const engine = new TrafficEngine(fakeApi({ neverApply: true }).api);
+  it.each(SEEDS)("reports an event that is accepted and never shown, instead of waiting for it (seed %i)", async (seed) => {
+    const engine = engineFor(fakeApi({ neverApply: true }).api, seed);
     engine.setRate(10);
     engine.start();
     await run(60_000);
@@ -139,7 +154,7 @@ describe("traffic engine", () => {
   });
 
   it("stops itself after the limit, so a forgotten tab does not keep writing", async () => {
-    const engine = new TrafficEngine(fakeApi().api);
+    const engine = engineFor(fakeApi().api);
     engine.setRate(1);
     engine.start();
     await run(AUTO_STOP_MS + 5_000);
@@ -149,7 +164,7 @@ describe("traffic engine", () => {
   });
 
   it("resets to nothing", async () => {
-    const engine = new TrafficEngine(fakeApi().api);
+    const engine = engineFor(fakeApi().api);
     engine.start();
     await run(3_000);
     engine.reset();
@@ -172,7 +187,7 @@ describe("live page", () => {
   }
 
   it("starts paused with the controls, and starts and stops the traffic", async () => {
-    const engine = new TrafficEngine(fakeApi().api);
+    const engine = engineFor(fakeApi().api);
     const user = userEvent.setup();
     renderLive(engine);
     expect(screen.getByText("PAUSED")).toBeVisible();
@@ -186,7 +201,7 @@ describe("live page", () => {
   });
 
   it("changes the rate with the slider", () => {
-    const engine = new TrafficEngine(fakeApi().api);
+    const engine = engineFor(fakeApi().api);
     renderLive(engine);
     const slider = screen.getByLabelText(/Rate/);
     act(() => {
@@ -197,7 +212,7 @@ describe("live page", () => {
   });
 
   it("stops the traffic when the page is left", () => {
-    const engine = new TrafficEngine(fakeApi().api);
+    const engine = engineFor(fakeApi().api);
     const { unmount } = renderLive(engine);
     act(() => {
       engine.start();

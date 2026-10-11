@@ -518,7 +518,7 @@ All use Pod Identity associations in namespace `shiptrack` or the add-on's names
 | events-dlq-visible | `ApproximateNumberOfMessagesVisible > 0` | SEV2 |
 | notify-dlq-visible | same | SEV2 |
 | pod-restarts | Growth of the largest `pod_number_of_container_restarts` in namespace `shiptrack` above 3 in 10 min, from a metric filter on the Container Insights `performance` log group (ADR-0014) | SEV2 |
-| sla-scan-heartbeat | Log metric filter `{ $.event = "sla_scan_completed" }`, sum < 1 over 15 min, `treat_missing_data = breaching` — **created disabled** (`actions_enabled = false`) until Wave 3 | SEV2 |
+| sla-scan-heartbeat | Log metric filter on the text `sla_scan_completed` in the application log group (the log shipper wraps the application's JSON line, so no `$.event` field exists there), sum < 1 over 15 min, `treat_missing_data = breaching`; its actions are on from Wave 3, when the CronJob takes over | SEV2 |
 | slo-availability-fast-burn | §11.1 | SEV1 |
 | slo-availability-slow-burn | §11.1 | SEV2 |
 

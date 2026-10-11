@@ -312,6 +312,11 @@ run "the_alarms_are_wired_to_the_right_severities" {
   }
 
   assert {
+    condition     = aws_cloudwatch_log_metric_filter.sla_scan.pattern == "\"sla_scan_completed\""
+    error_message = "The heartbeat filter matches the text; the log shipper wraps the application's JSON line, so a JSON pattern on $.event never matches."
+  }
+
+  assert {
     condition = alltrue([
       aws_cloudwatch_metric_alarm.sla_scan_heartbeat.actions_enabled == true,
       aws_cloudwatch_metric_alarm.sla_scan_heartbeat.treat_missing_data == "breaching",

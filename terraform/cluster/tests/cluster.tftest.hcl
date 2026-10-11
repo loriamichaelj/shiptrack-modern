@@ -230,6 +230,13 @@ run "the_cluster_follows_the_design" {
     ])
     error_message = "The cluster is shiptrack on Kubernetes 1.36."
   }
+
+  # Left on, Application Signals auto-instruments every Deployment behind a Service with an init
+  # container that has no securityContext, and the restricted Pod Security level refuses the pods.
+  assert {
+    condition     = jsondecode(module.eks.cluster_addons["amazon-cloudwatch-observability"].configuration_values).manager.applicationSignals.autoMonitor.monitorAllServices == false
+    error_message = "Application Signals auto monitor is off, or the API pods are refused by Pod Security."
+  }
 }
 
 run "access_entries_grant_the_pipelines_what_they_need" {

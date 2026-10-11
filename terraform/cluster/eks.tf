@@ -118,6 +118,17 @@ module "eks" {
     amazon-cloudwatch-observability = {
       addon_version = lookup(var.addon_versions, "amazon-cloudwatch-observability", null)
       most_recent   = !contains(keys(var.addon_versions), "amazon-cloudwatch-observability")
+      # Since v5.0.0 the add-on's Application Signals "Auto monitor" instruments every Deployment
+      # that sits behind a Service, and the init container it injects sets no securityContext, so
+      # the restricted Pod Security level of the shiptrack namespace refuses the pods. The design
+      # takes application metrics from Prometheus, not Application Signals, so turn it off.
+      configuration_values = jsonencode({
+        manager = {
+          applicationSignals = {
+            autoMonitor = { monitorAllServices = false }
+          }
+        }
+      })
       pod_identity_association = [{
         role_arn        = module.cwagent_role.arn
         service_account = local.service_accounts["cwagent"].name

@@ -10,7 +10,7 @@ the design is [`../DESIGN.md`](../DESIGN.md) §9.
 | [`wave-0/`](wave-0/) | Dark launch: weights stay at 0, modern is proven correct and fast |
 | `wave-1/` | Read path and UI, `track` 10, 50, 100 |
 | `wave-2/` | Write path, `default` 10, 25, 50, 100 |
-| `wave-3/` | Scheduled jobs and decommission |
+| [`wave-3/`](wave-3/) | Handoff, and wave 3: scheduled jobs. Legacy is kept as a fallback |
 
 ## What goes in a wave folder
 

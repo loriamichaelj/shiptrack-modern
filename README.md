@@ -58,15 +58,17 @@ serve the same build.
 | M5 Helm chart | Done; installed by `deploy.yml` |
 | M6 CI/CD | Done and in use: `terraform-apply`, `release`, and `deploy` have all run on GitHub |
 | M7 Observability | Partly done. The alarms (queue age, DLQs, pod restarts, SLA scan heartbeat, availability burn rate) are applied. The SLO document, the CloudWatch golden-signals dashboard, five of the six Grafana boards, and the Log Insights queries are not written |
-| M8 and later | Not started: runbooks and game days, Karpenter and cost optimization, the wave 3 contract migration |
+| M8 and later | Not started: runbooks and game days, Karpenter and cost optimization. The contract migration (M10) is not taken (ADR-0023) |
 
-Modern is deployed and passes the post-deploy smoke test through the ALB with the test-routing
-headers. The ALB weights are still 100% legacy, so no public traffic reaches it, and the wave 0
-evidence has not been collected.
+Modern serves all traffic. The cutover ran as waves 0 to 2 with the evidence in
+[`docs/migration/`](docs/migration/), the schema handoff is done (modern owns it), the SLA scan runs
+as a CronJob, and legacy's cron jobs are removed. Legacy is kept running as a fallback and is
+reachable on the preview port (platform ADR-0032, ADR-0023). The node-image findings accepted until
+2026-11-10 are in ADR-0021.
 
-To see it, open the preview address the platform exposes on port 8080 to an allow-listed address
-(platform ADR-0026), or send `X-ShipTrack-Target: modern` with the test token. The UI shows a stack
-badge that reads `modern`.
+Legacy's UI is on the preview port, for the addresses the platform allow-lists. Modern is on the
+main address; send `X-ShipTrack-Target: modern` with the test token to pin one request to it. The
+UI shows a stack badge that reads `modern`.
 
 ## Local development
 

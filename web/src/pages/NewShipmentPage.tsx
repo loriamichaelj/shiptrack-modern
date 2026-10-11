@@ -95,6 +95,8 @@ export function NewShipmentPage() {
             <Link to={`/shipments/${result.data.id}`}>Open the shipment</Link>
             {" · "}
             <Link to={`/track/${result.data.tracking_number}`}>Public tracking page</Link>
+            {" · "}
+            <Link to="/shipments">All shipments</Link>
           </p>
           {result.requestId !== null && <p className="muted">Request id {result.requestId}</p>}
         </div>

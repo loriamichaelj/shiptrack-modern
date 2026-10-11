@@ -1,6 +1,6 @@
-name: terraform-pr
+name: ci-terraform
 
-# Plans both roots for every pull request that touches Terraform. ci.yml already formats, validates,
+# Plans both roots for every pull request that touches Terraform. ci-checks.yml already formats, validates,
 # lints, and scans them without AWS access, so this only adds the plan, which needs the plan role and
 # therefore never runs for a fork. The comment shows resource addresses and actions, never attribute
 # values, and plan files are never uploaded.
@@ -10,7 +10,7 @@ on:
     paths:
       - "terraform/**"
       - ".github/scripts/terraform-ci.sh"
-      - ".github/workflows/terraform-pr.yml"
+      - ".github/workflows/ci-terraform.yml"
 
 permissions:
   contents: read

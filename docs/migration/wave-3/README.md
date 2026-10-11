@@ -32,7 +32,7 @@ Legacy is kept running as a fallback and nothing is destroyed (platform ADR-0032
 The heartbeat alarm paged SEV2 once its actions were on, although the scan was running. Its metric
 filter matched a JSON field the log shipper's wrapper does not expose; it now matches the text
 ([modern #31](https://github.com/loriamichaelj/shiptrack-modern/pull/31)), applied at 22:10Z. The alarm
-left ALARM: `cutover-gates` at 22:19Z reads 0 SEV2 in ALARM (run
+left ALARM: `check-cutover-gates` at 22:19Z reads 0 SEV2 in ALARM (run
 [38179963457](https://github.com/loriamichaelj/shiptrack-platform/actions/runs/38179963457)).
 
 ## Exit
@@ -41,4 +41,4 @@ left ALARM: `cutover-gates` at 22:19Z reads 0 SEV2 in ALARM (run
 |---|---|
 | Final cost snapshot captured | Not taken |
 | Exactly one `sla_alerts` row per breached shipment | Yes: `alerts=3`, `extra_alerts=0` after three breaches |
-| Legacy stays available as the fallback | Yes: running, idle, behind the preview port; `rollback-cutover.yml` and `legacy-cron.yml restore-sla` exist |
+| Legacy stays available as the fallback | Yes: running, idle, behind the preview port; `ops-rollback-cutover.yml` and `ops-legacy-cron.yml restore-sla` exist |

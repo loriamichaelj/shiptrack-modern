@@ -1,7 +1,7 @@
-name: deploy
+name: deploy-app
 
 # Installs the chart on the cluster with the image digest a release produced, smoke-tests through
-# the ALB, and rolls back if the smoke test fails. It never runs Terraform (terraform-apply.yml does)
+# the ALB, and rolls back if the smoke test fails. It never runs Terraform (apply-terraform.yml does)
 # and never builds anything. The `dev` environment requires a reviewer, so every deploy is approved.
 #
 # Runs after a successful release, or by hand with a digest (for a rollback to an older image).
@@ -10,7 +10,7 @@ name: deploy
 
 on:
   workflow_run:
-    workflows: [release]
+    workflows: [release-image]
     types: [completed]
     branches: [dev]
   workflow_dispatch:

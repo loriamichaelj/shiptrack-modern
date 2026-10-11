@@ -21,11 +21,11 @@ def uses(path: Path) -> list[str]:
 def test_there_are_workflows() -> None:
     names = {p.name for p in WORKFLOWS}
     assert {
-        "ci.yml",
-        "release.yml",
-        "deploy.yml",
-        "terraform-pr.yml",
-        "terraform-apply.yml",
+        "ci-checks.yml",
+        "release-image.yml",
+        "deploy-app.yml",
+        "ci-terraform.yml",
+        "apply-terraform.yml",
     } <= names
 
 
@@ -53,7 +53,7 @@ def test_no_workflow_has_write_permissions_by_default() -> None:
 
 
 def test_aws_access_goes_through_oidc_and_an_environment_for_changes() -> None:
-    for name in ("terraform-apply.yml", "deploy.yml"):
+    for name in ("apply-terraform.yml", "deploy-app.yml"):
         document = yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text())
         for job in document["jobs"].values():
             assert job["environment"] == "dev", name

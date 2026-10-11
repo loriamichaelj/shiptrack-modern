@@ -1,6 +1,6 @@
 # Inspector findings
 
-`security-findings.yml` on platform `8472048` (run
+`check-security-findings.yml` on platform `8472048` (run
 [38159470275](https://github.com/loriamichaelj/shiptrack-platform/actions/runs/38159470275)).
 Findings are placed in a scope by resource tag (platform ADR-0029). Only `modern` is gated.
 

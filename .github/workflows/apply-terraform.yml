@@ -1,4 +1,4 @@
-name: terraform-apply
+name: apply-terraform
 
 # Applies the cluster root, then the addons root, when Terraform changes reach `dev`. The `dev`
 # environment requires a reviewer, so every apply is approved by a person. The addons root reads what

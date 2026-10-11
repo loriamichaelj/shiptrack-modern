@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Plan or apply one Terraform root, or print some of its outputs. Run by terraform-pr.yml,
-# terraform-apply.yml, and terraform-outputs.yml.
+# Plan or apply one Terraform root, or print some of its outputs. Run by ci-terraform.yml,
+# apply-terraform.yml, and check-terraform-outputs.yml.
 # Usage: .github/scripts/terraform-ci.sh plan|apply|outputs
 #
 # The state bucket name contains the account ID, so the backend is configured at init time instead

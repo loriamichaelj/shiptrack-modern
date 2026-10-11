@@ -139,8 +139,8 @@ shiptrack-modern/
 │   └── cost/analysis.md
 ├── .github/
 │   ├── workflows/
-│   │   ├── ci.yml  release.yml  deploy.yml
-│   │   └── terraform-pr.yml  terraform-apply.yml
+│   │   ├── ci-checks.yml  release-image.yml  deploy-app.yml
+│   │   └── ci-terraform.yml  apply-terraform.yml
 │   ├── scripts/terraform-ci.sh # plan/apply wrapper that masks identifiers
 │   └── dependabot.yml          # github-actions, uv, npm, docker, terraform
 ├── .trivyignore (when a finding is accepted)  .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
@@ -574,7 +574,7 @@ If it is ever run, it is the point of no return for rolling back to legacy.
 | **1 — Read path + UI** | Wave 0 exit, including G6 | Platform PR: `cutover.track` modern 10 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7). Moves `/api/v1/track/*` and `/ui/*` together; the UI rule is sticky, so existing browser sessions stay on their stack | Platform gates G1–G4 per step; UI stack badge shows `modern` for new sessions | Platform PR or break-glass: `track.modern = 0` |
 | **2 — Write path** | Wave 1 at 100%; legacy **v1.1.0** deployed; `migrate_pod_to_s3.py` run on both hosts; PodSync cron installed; **G-POD:** `SELECT count(*) FROM shiptrack.pod_documents WHERE storage_uri LIKE 'file://%' AND uploaded_at < now() - interval '5 minutes'` = 0 (run through the allow-listed `pod-gate` evidence script, legacy §7.6); legacy change freeze on | `cutover.default` modern 10 → 25 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7) | G1–G5; DLQ = 0; simulator ledger `verify` shows 0 lost events for modern-routed traffic; no `pod_not_migrated` event for a POD older than 5 minutes | Weight back to legacy. **Keep workers running** until the events queue drains; S3 PODs are readable by legacy v1.1 |
 | **Handoff** | Wave 2 at 100% with G1–G5 passing | Flip schema ownership (§9.1) | Modern deploy with `migrations.enabled=true` is a no-op at head | Revert flags |
-| **3 — Scheduled jobs + decommission** | Handoff complete | 1) SSM: remove `/etc/cron.d/shiptrack-sla` and `shiptrack-podsync` from legacy hosts; 2) Helm: `slaScan.suspend=false`, enable heartbeat alarm; 3) verify exactly one alert per breach; 4) the contract migration (§9.1) is not taken; 5) legacy keeps running behind the preview port and nothing is destroyed (platform ADR-0032) | Final cost snapshot captured | Suspend the CronJob and re-enable legacy's cron (`legacy-cron.yml restore-sla`); `rollback-cutover.yml` sends traffic to legacy |
+| **3 — Scheduled jobs + decommission** | Handoff complete | 1) SSM: remove `/etc/cron.d/shiptrack-sla` and `shiptrack-podsync` from legacy hosts; 2) Helm: `slaScan.suspend=false`, enable heartbeat alarm; 3) verify exactly one alert per breach; 4) the contract migration (§9.1) is not taken; 5) legacy keeps running behind the preview port and nothing is destroyed (platform ADR-0032) | Final cost snapshot captured | Suspend the CronJob and re-enable legacy's cron (`ops-legacy-cron.yml restore-sla`); `ops-rollback-cutover.yml` sends traffic to legacy |
 
 ### 9.3 Validation evidence per wave
 Store everything under `docs/migration/wave-N/`, scrubbed of account IDs, ARNs, DNS names, and tokens before merge (platform §6.12):
@@ -589,7 +589,7 @@ Store everything under `docs/migration/wave-N/`, scrubbed of account IDs, ARNs, 
 
 ## 10. CI/CD
 
-### 10.1 `ci.yml` (pull_request) — parallel jobs, all required
+### 10.1 `ci-checks.yml` (pull_request) — parallel jobs, all required
 
 | Job | Steps |
 |---|---|
@@ -602,14 +602,14 @@ Store everything under `docs/migration/wave-N/`, scrubbed of account IDs, ARNs, 
 
 All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyignore` with an `# expires: YYYY-MM-DD reason` comment per entry and are mirrored in the findings register.
 
-### 10.2 `release.yml` (push to `dev`, after CI passes)
+### 10.2 `release-image.yml` (push to `dev`, after CI passes)
 1. OIDC → `<PREFIX>-modern-release` (trusts `ref:refs/heads/dev`; ECR push to `shiptrack/app` only).
 2. buildx multi-arch → push the per-arch digests. Assert identical `/app/web/dist/assets` listings across architectures and, for the same `web/` tree, against the legacy release's listing; then merge into `sha-<sha>`.
 3. Trivy scan of the **pushed digest** (gate).
 4. Output the digest.
 5. Optional stretch: cosign keyless signing + SBOM attestation.
 
-### 10.3 `deploy.yml` (`workflow_run` on release success, or `workflow_dispatch` with a digest)
+### 10.3 `deploy-app.yml` (`workflow_run` on release success, or `workflow_dispatch` with a digest)
 - `environment: dev` (required reviewers); `concurrency: deploy-dev` (no cancel)
 - Steps:
   1. OIDC → `<PREFIX>-modern-deploy`
@@ -625,7 +625,7 @@ All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyi
 - **DORA evidence:** the workflow emits commit timestamp → deploy-complete timestamp to `docs/migration/dora.csv` via the job summary (manually collected), to compare against the legacy deploy duration.
 
 ### 10.4 Terraform workflows
-Same pattern as platform §6.11, as a matrix over `cluster` and `addons`. Plan PR comments follow platform §6.12 (addresses and actions only; no plan artifacts). `addons` apply runs only after `cluster` apply succeeds in the same workflow. Pull request plans of `addons` do not refresh, because the plan role cannot read Secrets or RBAC objects (ADR-0018). `terraform-outputs.yml` is a read-only, by-hand workflow that prints `addon_versions` with the plan role, so the pins can be recorded without an apply (ADR-0013).
+Same pattern as platform §6.11, as a matrix over `cluster` and `addons`. Plan PR comments follow platform §6.12 (addresses and actions only; no plan artifacts). `addons` apply runs only after `cluster` apply succeeds in the same workflow. Pull request plans of `addons` do not refresh, because the plan role cannot read Secrets or RBAC objects (ADR-0018). `check-terraform-outputs.yml` is a read-only, by-hand workflow that prints `addon_versions` with the plan role, so the pins can be recorded without an apply (ADR-0013).
 
 ---
 
@@ -667,7 +667,7 @@ Each README contains hypothesis, blast radius, steps, expected signals, recovery
 | GD-3 | Poison message | Send a malformed event body directly to SQS | `events-dlq-visible` alarm | Fix → `aws sqs start-message-move-task` redrive → verify applied (`docs/runbooks/dlq-redrive.md`) |
 | GD-4 | Node loss | Terminate one node (or Karpenter spot interruption via AWS FIS **[VERIFY FIS EKS actions]**) | Pod rescheduling; no SLO alarm | Self-healing; evidence: PDB + topology spread held availability; simulator ledger shows 0 lost events |
 
-Ledger verification (GD-3, GD-4, and the Wave 2 and Wave 3 evidence) runs through `evidence.yml` in `shiptrack-legacy` (`ShipTrack-Evidence` on a legacy host) while the legacy ASG exists, because runners cannot reach the private RDS instance. After the legacy ASG is scaled to 0, it runs as a one-shot Kubernetes Job launched by `deploy.yml` (platform §6.4).
+Ledger verification (GD-3, GD-4, and the Wave 2 and Wave 3 evidence) runs through `check-evidence.yml` in `shiptrack-legacy` (`ShipTrack-Evidence` on a legacy host) while the legacy ASG exists, because runners cannot reach the private RDS instance. After the legacy ASG is scaled to 0, it runs as a one-shot Kubernetes Job launched by `deploy-app.yml` (platform §6.4).
 
 ---
 
@@ -759,7 +759,7 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 | **M3 Terraform cluster** | `terraform/cluster` | validate/tflint/checkov pass; every role has the boundary; SSM outputs defined |
 | **M4 Terraform addons** | `terraform/addons` (LBC, KEDA, Grafana, namespace, RBAC) | validate passes; any CR uses `kubectl_manifest` |
 | **M5 Helm chart** | All templates, schema, values | `helm lint` + kubeconform pass; install on OrbStack's local Kubernetes with stub values succeeds (TGB/KEDA CRDs installed there) |
-| **M6 CI/CD** | `ci.yml`, `release.yml`, `deploy.yml`, Terraform workflows | `actionlint` passes; all actions SHA-pinned |
+| **M6 CI/CD** | `ci-checks.yml`, `release-image.yml`, `deploy-app.yml`, Terraform workflows | `actionlint` passes; all actions SHA-pinned |
 | **M7 Observability** | Alarms, SLO doc, dashboards, Log Insights queries | Every alarm has owner/sev/runbook |
 | **M8 Cutover + game days** | Runbooks, `gamedays/`, wave evidence templates | Runbooks are copy-pasteable |
 | **M9 Optimization** | Karpenter (NodePools, EC2NodeClass), Graviton, spot workers, scale-to-zero, log tuning, cost analysis template | Plan clean; analysis template has a slot per O-item |

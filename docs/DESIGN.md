@@ -14,7 +14,7 @@
 ## 0. Instructions for the implementing agent
 
 1. **Fork, don't rewrite.** The first commit imports `shiptrack-legacy` at tag `v1.0.0` **unmodified** (`src/`, `migrations/`, `alembic.ini`, `tests/`, `web/`, `pyproject.toml`, and `requirements*`). Record the source repo, tag, and commit SHA in `docs/FORK.md`. Every later refactor references the remediation it implements in its pull request title or squash commit message (for example `REM-06: replace in-process queue with SQS`).
-2. **API contract is frozen.** The behavior in legacy design §3.4 must remain identical. The platform contract suite must pass against both stacks. The only allowed additions are `/healthz`, `/readyz`, the metrics server on port 9090, response headers `X-ShipTrack-Stack: modern`, `X-Request-Id`, and the REM-16 security headers, 503 `QUEUE_UNAVAILABLE` on the events endpoint, and the game-days-only `INJECTED_FAULT` 500 (§5.9). The contract suite recognizes both (legacy §3.4); `INJECTED_FAULT` is a failure outside game days. POD GET may return 302 → presigned URL. **The UI source in `web/` is frozen until Wave 2 completes**, because cutover gate G6 requires both stacks to serve an identical UI build.
+2. **API contract is frozen.** The behavior in legacy design §3.4 must remain identical. The platform contract suite must pass against both stacks. The only allowed additions are `/healthz`, `/readyz`, the metrics server on port 9090, response headers `X-ShipTrack-Stack: modern`, `X-Request-Id`, and the REM-16 security headers, 503 `QUEUE_UNAVAILABLE` on the events endpoint, and the game-days-only `INJECTED_FAULT` 500 (§5.9). The contract suite recognizes both (legacy §3.4); `INJECTED_FAULT` is a failure outside game days. POD GET may return 302 → presigned URL. **The UI in `web/` is not part of the contract.** It calls only the endpoints of legacy §3.4, so it may differ from legacy's UI (ADR-0024).
 3. **Schema changes are expand/contract only** and must follow the ownership handoff in §9.1. Helm migrations stay **disabled** until handoff.
 4. **Never apply from a workstation.** Do not run `terraform apply`, `helm install/upgrade`, or `kubectl apply` against a real cluster. These run only inside GitHub Actions workflows with environment approval. OrbStack's local Kubernetes is fine for chart testing.
 5. Pin all versions: Terraform modules, Helm charts, base-image digests, and GitHub Actions (by SHA).
@@ -95,7 +95,7 @@
 ```
 shiptrack-modern/
 ├── src/shiptrack/              # Forked from legacy v1.0.0, then refactored
-├── web/                        # React UI, forked unchanged (frozen until Wave 2)
+├── web/                        # React UI (modern's own since the cutover, ADR-0024)
 ├── migrations/                 # Alembic (same lineage as legacy)
 ├── tests/{unit,integration}/
 ├── pyproject.toml  uv.lock
@@ -307,6 +307,19 @@ This is correct regardless of how many scanners run. The CronJob stays `suspend:
 
 URLs, cache headers, and HTML are identical to legacy (contract). The UI is not served on port 9090. For metrics, the `route` label on UI requests is the template `/ui/{path}`, never the raw path.
 
+**The UI** is modern's own and uses only the endpoints above, with no backend change:
+
+| Route | Does | Calls |
+|---|---|---|
+| `/ui/` | Tracking-number search, recent searches, links | none |
+| `/ui/track/:trackingNumber` | Status, progress stepper, event timeline, auto-refresh every 30 s | `GET /api/v1/track/{n}` |
+| `/ui/shipments` | Counts, status and carrier charts, filters, overdue flags, up to 20 pages of 100 | `GET /api/v1/shipments` |
+| `/ui/shipments/new` | Creates a shipment | `POST /api/v1/shipments` |
+| `/ui/shipments/:id` | Details, progress, history; sends an event with a generated `Idempotency-Key`; uploads proof of delivery (PDF, PNG, JPEG, up to 10 MiB) and opens it | `GET /api/v1/shipments/{id}`, `POST …/events`, `POST …/pod`, `GET …/pod/{doc}` |
+| `/ui/system` | Readiness, the serving stack, and an explorer of four read-only calls | `GET /readyz`, `/healthz`, `/api/v1/shipments?limit=3`, `/api/v1/track/{unknown}` |
+
+An **API activity** panel lists every call the page made (method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the bodies). The stack badge asks for the UI's own base path on load and reads `X-ShipTrack-Stack`. Charts are SVG with presentation attributes and icons are inline SVG, so the CSP below needs no allowance; a document is shown by its same-origin URL (`img-src 'self'`), never a `blob:` URL.
+
 **Security headers** (middleware, every port-8000 response):
 - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`
 - `X-Content-Type-Options: nosniff`
@@ -323,7 +336,7 @@ URLs, cache headers, and HTML are identical to legacy (contract). The UI is not 
 # syntax=docker/dockerfile:1
 # Base images pinned by digest; Renovate/Dependabot updates them (REM-14)
 FROM --platform=$BUILDPLATFORM node:24-slim@sha256:<digest> AS web
-# Node version must equal web/.nvmrc and legacy's UI build (cutover gate G6)
+# Node version must equal web/.nvmrc
 # npm ci && npm run build in web/ → /web/dist
 
 FROM python:3.12-slim@sha256:<digest> AS build
@@ -570,8 +583,8 @@ If it is ever run, it is the point of no return for rolling back to legacy.
 
 | Wave | Entry criteria | Actions | Exit criteria | Rollback |
 |---|---|---|---|---|
-| **0 — Dark launch** | Platform applied; modern cluster + add-ons + release deployed | Weights 0; contract `full` suite with `TARGET=modern`; k6 `baseline` with `TARGET=modern`; contract `ui_parity` check (gate G6) | Contract green; k6 thresholds met; all alarms/dashboards live; Inspector shows no fixable CRITICAL/HIGH | N/A (no traffic) |
-| **1 — Read path + UI** | Wave 0 exit, including G6 | Platform PR: `cutover.track` modern 10 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7). Moves `/api/v1/track/*` and `/ui/*` together; the UI rule is sticky, so existing browser sessions stay on their stack | Platform gates G1–G4 per step; UI stack badge shows `modern` for new sessions | Platform PR or break-glass: `track.modern = 0` |
+| **0 — Dark launch** | Platform applied; modern cluster + add-ons + release deployed | Weights 0; contract `full` suite with `TARGET=modern`; k6 `baseline` with `TARGET=modern` | Contract green; k6 thresholds met; all alarms/dashboards live; Inspector shows no fixable CRITICAL/HIGH | N/A (no traffic) |
+| **1 — Read path + UI** | Wave 0 exit | Platform PR: `cutover.track` modern 10 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7). Moves `/api/v1/track/*` and `/ui/*` together; the UI rule is sticky, so existing browser sessions stay on their stack | Platform gates G1–G4 per step; UI stack badge shows `modern` for new sessions | Platform PR or break-glass: `track.modern = 0` |
 | **2 — Write path** | Wave 1 at 100%; legacy **v1.1.0** deployed; `migrate_pod_to_s3.py` run on both hosts; PodSync cron installed; **G-POD:** `SELECT count(*) FROM shiptrack.pod_documents WHERE storage_uri LIKE 'file://%' AND uploaded_at < now() - interval '5 minutes'` = 0 (run through the allow-listed `pod-gate` evidence script, legacy §7.6); legacy change freeze on | `cutover.default` modern 10 → 25 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7) | G1–G5; DLQ = 0; simulator ledger `verify` shows 0 lost events for modern-routed traffic; no `pod_not_migrated` event for a POD older than 5 minutes | Weight back to legacy. **Keep workers running** until the events queue drains; S3 PODs are readable by legacy v1.1 |
 | **Handoff** | Wave 2 at 100% with G1–G5 passing | Flip schema ownership (§9.1) | Modern deploy with `migrations.enabled=true` is a no-op at head | Revert flags |
 | **3 — Scheduled jobs + decommission** | Handoff complete | 1) SSM: remove `/etc/cron.d/shiptrack-sla` and `shiptrack-podsync` from legacy hosts; 2) Helm: `slaScan.suspend=false`, enable heartbeat alarm; 3) verify exactly one alert per breach; 4) the contract migration (§9.1) is not taken; 5) legacy keeps running behind the preview port and nothing is destroyed (platform ADR-0032) | Final cost snapshot captured | Suspend the CronJob and re-enable legacy's cron (`ops-legacy-cron.yml restore-sla`); `ops-rollback-cutover.yml` sends traffic to legacy |
@@ -604,7 +617,7 @@ All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyi
 
 ### 10.2 `release-image.yml` (push to `dev`, after CI passes)
 1. OIDC → `<PREFIX>-modern-release` (trusts `ref:refs/heads/dev`; ECR push to `shiptrack/app` only).
-2. buildx multi-arch → push the per-arch digests. Assert identical `/app/web/dist/assets` listings across architectures and, for the same `web/` tree, against the legacy release's listing; then merge into `sha-<sha>`.
+2. buildx multi-arch → push the per-arch digests. Assert identical `/app/web/dist/assets` listings across architectures; then merge into `sha-<sha>`.
 3. Trivy scan of the **pushed digest** (gate).
 4. Output the digest.
 5. Optional stretch: cosign keyless signing + SBOM attestation.
@@ -743,7 +756,7 @@ The final presentation requires **at least 3** of these, with numbers.
 8. Exactly one `sla_alerts` row per breached shipment after Wave 3 (REM-09 evidence).
 9. SLOs, burn-rate alarms, dashboards, and runbooks exist. GD-1…GD-4 have evidence folders.
 10. Wave 0–3 evidence is stored per §9.3. The cost analysis contains ≥ 3 optimization actions with numbers.
-11. `/ui/` serves the same build as legacy (G6), carries the REM-16 headers, and its stack badge shows `modern`.
+11. `/ui/` serves modern's own build, carries the REM-16 headers, and its stack badge shows `modern`.
 
 ---
 

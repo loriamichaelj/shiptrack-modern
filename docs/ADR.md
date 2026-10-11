@@ -27,6 +27,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0021 | `accepted-node-image-findings-until-rebuilt-ami` | Accepted |
 | 0022 | `event-route-latency-allowance` | Accepted |
 | 0023 | `contract-migration-not-taken` | Accepted |
+| 0024 | `modern-ui-is-its-own` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -308,3 +309,17 @@ Conditions:
 **Decision:** The contract migration is not built and not run. Legacy stays running (platform ADR-0032), and rolling back stays possible: `ops-rollback-cutover.yml` sends traffic to legacy, and `ops-legacy-cron.yml restore-sla` puts legacy's SLA cron back.
 
 **Consequences:** "Exactly one alert per breach" holds because there is one scanner and the scan is one atomic statement, not because the database refuses a second row. If legacy's SLA cron is restored for a rollback, modern's CronJob has to be suspended first, or AP-09 returns: two scanners can alert twice. The unique constraint can be added later, after legacy is retired, as the same three revisions.
+
+## ADR-0024: modern-ui-is-its-own
+
+**Status:** Accepted
+
+**Context:** `web/` was forked unchanged from legacy and frozen until wave 2, and gate G6 (platform §7) required both stacks to serve identical hashed asset names, so that a browser sticky to one stack never mixed builds while weights moved. The cutover is complete: modern serves every request and legacy is a fallback on the preview port. The owner asked that legacy's UI stay as it is and that modern's UI be built out with more data, icons, colour, and visuals.
+
+**Decision:**
+- Gate G6 is retired (platform ADR-0033). Modern's UI may differ from legacy's.
+- Legacy's UI is not changed.
+- The UI is built only on the existing API (the contract is still frozen): no endpoint, field, or header is added for it. It keeps the REM-16 CSP: no inline script or style, no `blob:` or `data:` script, same-origin images only.
+- The new UI ships as one release and one deploy.
+
+**Consequences:** The two UIs now differ, so opening both shows modern's progress against legacy's original. The contract suite no longer asserts parity; it still asserts that `/ui/` serves the shell and its assets with the right headers on whichever stack it addresses. A browser sticky to legacy sees legacy's UI and one on modern sees modern's, which is the intent while legacy is only a fallback. The UI creates test data when someone uses the create, event, and proof-of-delivery forms; it is not a read-only view.

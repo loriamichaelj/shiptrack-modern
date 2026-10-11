@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { fetchTrack, isValidTrackingNumber, type TrackOutcome, type TrackView } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
+import { StatusStepper } from "../components/StatusStepper";
 import { Timeline } from "../components/Timeline";
 import { formatTimestamp } from "../format";
+import { Icon } from "../icons";
 import { useStack } from "../stack";
 
 export const REFRESH_INTERVAL_MS = 30_000;
@@ -120,21 +122,24 @@ function Result({ loaded, onRetry }: { loaded: Loaded; onRetry: () => void }) {
 function Details({ view, onRefresh }: { view: TrackView; onRefresh: () => void }) {
   return (
     <>
-      <p>
-        <StatusBadge status={view.status} />
-      </p>
-      <dl className="details">
-        <dt>Carrier</dt>
-        <dd>{view.carrier_code}</dd>
-        <dt>Estimated delivery</dt>
-        <dd>{formatTimestamp(view.estimated_delivery_at)}</dd>
-        <dt>Delivered</dt>
-        <dd>{formatTimestamp(view.delivered_at)}</dd>
-      </dl>
+      <div className="card">
+        <p>
+          <StatusBadge status={view.status} />
+        </p>
+        <StatusStepper status={view.status} reached={view.events.map((e) => e.event_type)} />
+        <dl className="details">
+          <dt>Carrier</dt>
+          <dd>{view.carrier_code}</dd>
+          <dt>Estimated delivery</dt>
+          <dd>{formatTimestamp(view.estimated_delivery_at)}</dd>
+          <dt>Delivered</dt>
+          <dd>{formatTimestamp(view.delivered_at)}</dd>
+        </dl>
+      </div>
       <h2>History</h2>
       <Timeline events={view.events} />
       <button type="button" onClick={onRefresh}>
-        Refresh
+        <Icon name="refresh" size={16} /> Refresh
       </button>
       {view.status !== "DELIVERED" && (
         <p className="muted">This page refreshes automatically every 30 seconds.</p>

@@ -68,7 +68,8 @@ reachable on the preview port (platform ADR-0032, ADR-0023). The node-image find
 
 Legacy's UI is on the preview port, for the addresses the platform allow-lists. Modern is on the
 main address; send `X-ShipTrack-Target: modern` with the test token to pin one request to it. The
-UI shows a stack badge that reads `modern`.
+UI shows a stack badge that reads `modern` from the first paint: each stack names itself in a
+`Server-Timing` header, which the page reads from its own load.
 
 ## Local development
 

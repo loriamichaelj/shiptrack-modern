@@ -20,3 +20,4 @@ Procedure: platform
 |---|---|---|
 | [2a](step-2a.md) | legacy 90, modern 10 | Go |
 | [2b](step-2b.md) | legacy 75, modern 25 | Go |
+| [2c](step-2c.md) | legacy 50, modern 50 | Go |

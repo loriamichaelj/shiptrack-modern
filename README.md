@@ -43,7 +43,8 @@ serve the same build.
 | `terraform/cluster/` | EKS, ECR, SQS, EventBridge, Pod Identity roles, Prometheus, and alarms; publishes `/shiptrack/modern/*` |
 | `terraform/addons/` | The load balancer controller, KEDA, Grafana, the namespace, and the deploy role's RBAC. Applied after `cluster` |
 | `terraform/modules/pod-role/` | One IAM role and Pod Identity association per service account |
-| `scripts/` | `render-values.sh` (SSM to Helm values), `smoke.sh`, `local-init.sh` |
+| `scripts/` | `render-values.sh` (SSM to Helm values), `smoke.sh`, `sample-rollout.sh` (what the cluster is doing during a Helm wait), `local-init.sh` |
+| `.trivyignore` | The three accepted findings in the EKS module, each with an expiry (ADR-0015). Recorded in [`docs/security/findings-register.md`](docs/security/findings-register.md) |
 | `observability/grafana/` | Dashboards that `terraform/addons` provisions |
 
 ## Status
@@ -53,12 +54,19 @@ serve the same build.
 | M0 Fork | Done |
 | M1 Application | Done: tests, lint, types, and the platform contract suite against the compose stack |
 | M2 Image | Done: builds for amd64 and arm64, Trivy clean |
-| M3 Terraform cluster, M4 addons | Written and tested offline; not applied |
-| M5 Helm chart | Written; lint, kubeconform, and render tests pass; not installed on a cluster |
-| M6 CI/CD | Written; not yet run on GitHub |
-| M7 and later | Not started: SLO document and dashboards, runbooks and game days, Karpenter, wave 3 |
+| M3 Terraform cluster, M4 addons | Done and applied |
+| M5 Helm chart | Done; installed by `deploy.yml` |
+| M6 CI/CD | Done and in use: `terraform-apply`, `release`, and `deploy` have all run on GitHub |
+| M7 Observability | Partly done. The alarms (queue age, DLQs, pod restarts, SLA scan heartbeat, availability burn rate) are applied. The SLO document, the CloudWatch golden-signals dashboard, five of the six Grafana boards, and the Log Insights queries are not written |
+| M8 and later | Not started: runbooks and game days, Karpenter and cost optimization, the wave 3 contract migration |
 
-Nothing in this repository has been applied to AWS yet.
+Modern is deployed and passes the post-deploy smoke test through the ALB with the test-routing
+headers. The ALB weights are still 100% legacy, so no public traffic reaches it, and the wave 0
+evidence has not been collected.
+
+To see it, open the preview address the platform exposes on port 8080 to an allow-listed address
+(platform ADR-0026), or send `X-ShipTrack-Target: modern` with the test token. The UI shows a stack
+badge that reads `modern`.
 
 ## Local development
 
@@ -108,14 +116,18 @@ the `dev` environment requires a reviewer.
 | Workflow | Runs | Does |
 |---|---|---|
 | `ci.yml` | pull requests | Six parallel jobs: tests with a 75% coverage gate and a dependency audit; the UI checks; gitleaks; the image build with Trivy and an SBOM; Terraform checks; Helm lint, kubeconform, and Checkov |
-| `terraform-pr.yml` | pull requests touching Terraform | A plan comment for both roots, addresses and actions only |
-| `terraform-apply.yml` | push to `dev`, or by hand | Applies `cluster`, then `addons`, after one approval |
+| `terraform-pr.yml` | pull requests touching Terraform | A plan comment for both roots, addresses and actions only. The addons root is planned without refreshing (ADR-0018) |
+| `terraform-apply.yml` | push to `dev`, or by hand | Applies `cluster`, then `addons`, after one approval, and prints `addon_versions` |
+| `terraform-outputs.yml` | by hand | Read-only: prints `addon_versions` as HCL with the plan role. No plan, no lock, no approval |
 | `release.yml` | push to `dev` that changes the image | Builds each architecture natively, merges them, scans the pushed digest, and hands the digest on |
-| `deploy.yml` | after a release, or by hand with a digest | `helm upgrade --atomic`, a smoke test through the ALB, and a rollback if it fails |
+| `deploy.yml` | after a release, or by hand with a digest | `helm upgrade --atomic` with a rollout sampler beside it (ADR-0019), a smoke test through the ALB with the platform contract suite, and a rollback if it fails |
 
 First deploy, in order: `terraform-apply`, then `release`, then `deploy` (it follows the release by
-itself). Registering the modern target group with the ALB weights is a change in the platform
-repository.
+itself). The platform has already registered `tg-modern` with the ALB at weight 0: the cutover moves
+the weights, and that is a platform pull request (platform `docs/runbooks/cutover.md`, once written).
+
+A `release` that runs before the cluster root has created the ECR repository fails at the push, and
+`deploy` then skips itself. Run `release` again by hand after the first apply.
 
 ## Rules that apply here
 

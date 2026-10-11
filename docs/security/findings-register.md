@@ -12,3 +12,5 @@ as `<ACCOUNT_ID>` and `<ALB_DNS>` (platform design §6.12).
 | AWS-0040 | Trivy config | `module.eks` `aws_eks_cluster.this[0]` public endpoint enabled | CRITICAL | modern | risk-accepted | ADR-0015, design M-R1 | 2027-04-10 |
 | AWS-0041 | Trivy config | `module.eks` `aws_eks_cluster.this[0]` `public_access_cidrs` is `0.0.0.0/0` | CRITICAL | modern | risk-accepted | ADR-0015, design M-R1 | 2027-04-10 |
 | AWS-0104 | Trivy config | `module.eks` `aws_security_group_rule.node["egress_all"]` | CRITICAL | modern | risk-accepted | ADR-0015 | 2027-04-10 |
+| Inspector node-image set (20 CVEs: 1 CRITICAL, 19 HIGH; listed in ADR-0021) | Inspector | the two `system` node group EC2 nodes (EKS AL2023 AMI `v20261003`, Go modules in node binaries) | CRITICAL | modern | risk-accepted | ADR-0021, platform ADR-0029 | 2026-11-10 |
+

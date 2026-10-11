@@ -18,7 +18,8 @@ workerNotify:
   keda: { minReplicaCount: 0, maxReplicaCount: 3, queueLength: 20 }
 
 slaScan:
-  suspend: true
+  # Wave 3, step 2: legacy's SLA cron is removed, so modern's CronJob is the only scanner.
+  suspend: false
 
 migrations:
   # The schema ownership handoff (design 9.1): modern owns the schema from here, and legacy's

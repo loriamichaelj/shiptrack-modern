@@ -133,16 +133,18 @@ def test_keda_scales_the_workers_from_the_queues() -> None:
     assert "replicas" not in by_kind(docs, "Deployment")["shiptrack-worker-events"]["spec"]
 
 
-def test_the_sla_scan_is_suspended_until_wave_three() -> None:
+def test_the_sla_scan_is_suspended_in_the_chart_and_live_in_dev() -> None:
+    # The chart ships suspended; the dev environment turns it on in wave 3, once legacy's cron is gone.
+    assert yaml.safe_load((CHART / "values.yaml").read_text())["slaScan"]["suspend"] is True
     cron = by_kind(render(), "CronJob")["shiptrack-sla-scan"]["spec"]
-    assert cron["suspend"] is True
+    assert cron["suspend"] is False
     assert cron["schedule"] == "*/5 * * * *"
     assert cron["concurrencyPolicy"] == "Forbid"
     assert cron["startingDeadlineSeconds"] == 120
     job = cron["jobTemplate"]["spec"]
     assert (job["backoffLimit"], job["activeDeadlineSeconds"]) == (1, 240)
-    live = by_kind(render("--set", "slaScan.suspend=false"), "CronJob")["shiptrack-sla-scan"]
-    assert live["spec"]["suspend"] is False
+    held = by_kind(render("--set", "slaScan.suspend=true"), "CronJob")["shiptrack-sla-scan"]
+    assert held["spec"]["suspend"] is True
 
 
 def test_the_migration_job_is_a_hook_off_in_the_chart_and_on_in_dev() -> None:

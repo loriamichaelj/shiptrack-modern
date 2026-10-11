@@ -11,3 +11,4 @@ Entry: [wave 0](../wave-0/README.md) exit, with the accepted node-image findings
 | Step | `track` | Result |
 |---|---|---|
 | [1a](step-1a.md) | legacy 90, modern 10 | Go |
+| [1b](step-1b.md) | legacy 50, modern 50 | Go |

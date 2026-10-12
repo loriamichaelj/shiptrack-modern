@@ -143,9 +143,10 @@ run "grafana_reads_amp_with_sigv4_and_has_no_ingress" {
     condition = alltrue([
       yamldecode(helm_release.grafana.values[0]).service.type == "ClusterIP",
       yamldecode(helm_release.grafana.values[0]).datasources["datasources.yaml"].datasources[0].jsonData.sigV4Auth == true,
+      yamldecode(helm_release.grafana.values[0])["grafana.ini"].auth.sigv4_auth_enabled == true,
       yamldecode(helm_release.grafana.values[0]).datasources["datasources.yaml"].datasources[0].url == "https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-00000000-0000-0000-0000-000000000000/",
     ])
-    error_message = "Grafana is ClusterIP and queries the workspace with SigV4."
+    error_message = "Grafana is ClusterIP and queries the workspace with SigV4, which Grafana OSS honours only with auth.sigv4_auth_enabled."
   }
 
   assert {

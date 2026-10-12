@@ -338,7 +338,7 @@ Conditions:
 - It is bounded: 1 to 20 requests a second, 8 in flight, 120 shipments tracked, an automatic stop after 15 minutes, and a stop when the page is left.
 - No endpoint, header, or field is added.
 
-**Consequences:** It writes real rows to the shared database, which stay: nothing deletes them, and they are isolated only by the carrier code. The numbers are what this browser sees, so latency includes its distance to the load balancer; the apply lag (a `202` to the shipment showing the event) is measured by polling, to a resolution of a few hundred milliseconds. It shows only its own traffic, not other clients'. Throughput is limited by one browser; the k6 baseline remains the way to load the system.
+**Consequences:** It writes real rows to the shared database, which stay until the platform's `ops-reset-data` (platform ADR-0034) clears the database, because nothing in the API deletes them, and they are isolated only by the carrier code. The numbers are what this browser sees, so latency includes its distance to the load balancer; the apply lag (a `202` to the shipment showing the event) is measured by polling, to a resolution of a few hundred milliseconds. It shows only its own traffic, not other clients'. Throughput is limited by one browser; the k6 baseline remains the way to load the system.
 
 ## ADR-0026: one-runtime-for-live-and-browse
 
@@ -350,7 +350,7 @@ Conditions:
 - One runtime, held above the router: the traffic engine and a shipment store. The engine writes what it creates and reads to the store; Browse and System read the store; Browse also reads the server's list into it, all pages, on load and every 15 s. A status is never moved backwards by a late read.
 - Traffic is not stopped when a page is left. The header shows it while it runs, with a stop control. A run stops by itself after an hour or after 1,000 shipments created, and its rate follows the clock, so a background tab, whose timers run about once a second, keeps the rate.
 - Browse has no page cap and no "load more": its list is complete when the server stops returning a cursor.
-- "Fresh at zero" is the live view's: its counters and board start empty and Reset empties them. The shipments already in the database stay and are shown by Browse.
+- "Fresh at zero" is the live view's: its counters and board start empty and Reset empties them. The shipments already in the database stay and are shown by Browse; the platform's `ops-reset-data` (platform ADR-0034) is what deletes them.
 - API call totals are counted separately from the list of recent calls, which keeps 200.
 
-**Consequences:** Browse reads the whole list, so its cost grows with the data: one request per 100 shipments, repeated every 15 s while it is open. The cap of 1,000 created per run bounds what the live traffic adds, and nothing deletes rows, so the list only grows. A second tab runs its own engine and store; the two agree through the server's list within 15 s, and not instantly.
+**Consequences:** Browse reads the whole list, so its cost grows with the data: one request per 100 shipments, repeated every 15 s while it is open. The cap of 1,000 created per run bounds what the live traffic adds, and the API deletes no rows, so the list grows until `ops-reset-data` clears it. A second tab runs its own engine and store; the two agree through the server's list within 15 s, and not instantly.

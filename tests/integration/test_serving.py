@@ -22,11 +22,18 @@ SHELL = (
 )
 
 
+ICON = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<rect width="64" height="64"/></svg>'
+)
+
+
 @pytest.fixture()
 def web_dist(tmp_path: Path) -> Path:
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text(SHELL)
     (tmp_path / "assets" / "app-abc123.js").write_text("console.log('ui')")
+    (tmp_path / "assets" / "favicon-abc123.svg").write_text(ICON)
     return tmp_path
 
 
@@ -80,6 +87,15 @@ def test_hashed_assets_are_immutable(ui_client: TestClient) -> None:
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert response.text == "console.log('ui')"
+
+
+def test_the_icon_is_an_svg_asset_the_csp_allows(ui_client: TestClient) -> None:
+    response = ui_client.get("/ui/assets/favicon-abc123.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    # The icon is an image from this origin, which the policy's `img-src 'self'` permits.
+    assert "img-src 'self'" in response.headers["content-security-policy"]
 
 
 def test_a_missing_asset_is_a_404_not_the_shell(ui_client: TestClient) -> None:

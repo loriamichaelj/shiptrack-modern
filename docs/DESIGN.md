@@ -657,7 +657,7 @@ Same pattern as platform §6.11, as a matrix over `cluster` and `addons`. Plan P
 - **Fast:** burn > 14.4× over 1 h **AND** over 5 min → SEV1
 - **Slow:** burn > 6× over 6 h **AND** over 30 min → SEV2
 
-Latency and freshness SLOs are tracked in Grafana panels with recording rules (alerting on them is a stretch).
+Latency and freshness SLOs are tracked in the service-levels board, read from the histogram buckets over the selected range (ADR-0027). Recording rules and burn-rate panels on them are a stretch.
 
 ### 11.2 Dashboards
 - **CloudWatch `shiptrack-modern-golden-signals`:** tg-modern RED; SQS depth/age (both queues + DLQs); pods and restarts; node CPU/mem (Container Insights); RDS connections; HPA/KEDA replica counts.
@@ -770,7 +770,7 @@ Cross-repo build order is in platform §13. M0–M2 (fork, application, image) a
 | **M1 App refactor** | REM-01, 02, 05, 06, 07, 08, 09 (scan logic), 15, 16 in code; UI static serving (§5.11); §5.9 fault injection; schema compat guard; tests incl. SQS, S3, Secrets Manager, and EventBridge via an AWS API emulator (LocalStack locally, a moto server in CI; the tests take the endpoint from the environment) | pytest green; contract suite green against a local `docker compose` on OrbStack (app + Postgres + LocalStack) |
 | **M2 Image** | Dockerfile (including the `web` stage), `.dockerignore` | Builds amd64 + arm64; runs as 10001; Trivy clean; `/ui/` renders from the running container |
 | **M3 Terraform cluster** | `terraform/cluster` | validate/tflint/checkov pass; every role has the boundary; SSM outputs defined |
-| **M4 Terraform addons** | `terraform/addons` (LBC, KEDA, Grafana, namespace, RBAC) | validate passes; any CR uses `kubectl_manifest` |
+| **M4 Terraform addons** | `terraform/addons` (LBC, KEDA, Grafana, namespace, RBAC) | validate passes; any CR is rendered by a chart (`extraObjects`) or uses `kubectl_manifest` |
 | **M5 Helm chart** | All templates, schema, values | `helm lint` + kubeconform pass; install on OrbStack's local Kubernetes with stub values succeeds (TGB/KEDA CRDs installed there) |
 | **M6 CI/CD** | `ci-checks.yml`, `release-image.yml`, `deploy-app.yml`, Terraform workflows | `actionlint` passes; all actions SHA-pinned |
 | **M7 Observability** | Alarms, SLO doc, dashboards, Log Insights queries | Every alarm has owner/sev/runbook |

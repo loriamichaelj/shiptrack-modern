@@ -72,6 +72,12 @@ export interface Clock {
   random(): number;
 }
 
+/**
+ * The carriers migration 0001 seeds; the API answers 422 for any other code. Each created shipment
+ * takes one at random, so the data is spread across them. ZZTEST is the one the platform's tests use.
+ */
+export const CARRIERS: readonly string[] = ["ACME", "BOLT", "CRWN", "MFLT", "ZZTEST"];
+
 export const MAX_RATE = 20;
 export const MIN_RATE = 1;
 const MAX_IN_FLIGHT = 8;
@@ -101,6 +107,8 @@ interface Tracked extends BoardCard {
   pendingSince: number | null;
   lastPoll: number;
   done: boolean;
+  /** An event is being sent. Another dispatch must not pick the same shipment meanwhile. */
+  busy: boolean;
 }
 
 export function percentile(values: readonly number[], p: number): number {
@@ -142,7 +150,6 @@ export class TrafficEngine {
   private stack: string | null = null;
   private stoppedBecause: string | null = null;
   private snapshot: Snapshot;
-  private carrier = "ZZTEST";
   private readonly store: ShipmentStore | null;
 
   constructor(
@@ -241,7 +248,7 @@ export class TrafficEngine {
     this.inFlight += 1;
     try {
       const now = this.clock.now();
-      const movable = this.tracked.filter((s) => !s.done && s.pending === null && s.plan.length > 0);
+      const movable = this.tracked.filter((s) => !s.done && !s.busy && s.pending === null && s.plan.length > 0);
       const pending = this.tracked.filter((s) => s.pending !== null);
       // A shipment waiting for its event to show is looked at again soon, oldest first, so that the
       // lag measured is the lag of the system and not of the next random read.
@@ -273,7 +280,8 @@ export class TrafficEngine {
     const origin = this.pick(CITIES) ?? "Leeds";
     const destination = this.pick(CITIES.filter((c) => c !== origin)) ?? "Cardiff";
     const started = this.clock.now();
-    const result = await this.api.createShipment(this.carrier, origin, destination);
+    const carrier = this.pick(CARRIERS) ?? "ZZTEST";
+    const result = await this.api.createShipment(carrier, origin, destination);
     const ms = this.clock.now() - started;
     this.count(ms, !result.ok);
     if (!result.ok) {
@@ -291,6 +299,7 @@ export class TrafficEngine {
       pendingSince: null,
       lastPoll: 0,
       done: false,
+      busy: false,
       plan: this.clock.random() < 0.06 ? [...EXCEPTION_PATH] : [...HAPPY],
     });
     if (this.tracked.length > MAX_TRACKED) {
@@ -303,6 +312,17 @@ export class TrafficEngine {
   private async advance(shipment: Tracked): Promise<void> {
     const type = shipment.plan[0];
     if (type === undefined) return;
+    // Claimed before the first await: two dispatches that picked the same shipment would each send
+    // this event and each remove one from the plan, and the one after it would never be sent.
+    shipment.busy = true;
+    try {
+      await this.send(shipment, type);
+    } finally {
+      shipment.busy = false;
+    }
+  }
+
+  private async send(shipment: Tracked, type: EventType): Promise<void> {
     const location = this.pick(CITIES) ?? "Hub";
     const key = idempotencyKey(this.clock);
     const started = this.clock.now();
@@ -359,6 +379,8 @@ export class TrafficEngine {
       shipment.pending = null;
       shipment.pendingSince = null;
       if (shipment.status === "DELIVERED" || shipment.status === "EXCEPTION") shipment.done = true;
+      // Nothing left to send and nothing waiting to show: whatever it reads, it is finished.
+      if (shipment.plan.length === 0) shipment.done = true;
       this.log("applied", shipment.trackingNumber, `now ${result.status} (applied after ${lag} ms)`, ms, true);
     } else if (before !== result.status) {
       this.log("read", shipment.trackingNumber, `now ${result.status}`, ms, true);

@@ -47,6 +47,27 @@ export function stubFetch(...responses: (Response | Error)[]) {
   return mock;
 }
 
+/**
+ * Stub fetch by URL: the first route whose text the URL contains answers. A page that reads the
+ * server's list and also looks one shipment up needs both, in whatever order they arrive.
+ */
+export function routedFetch(routes: [string, Response | Error][]) {
+  const mock = vi.fn((input: unknown): Promise<Response> => {
+    const url = String(input);
+    const hit = routes.find(([part]) => url.includes(part));
+    if (hit === undefined) return Promise.reject(new Error(`routedFetch: no route for ${url}`));
+    const [, answer] = hit;
+    return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer.clone());
+  });
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
+/** The URLs a fetch stub was called with. */
+export function calledUrls(mock: { mock: { calls: unknown[][] } }): string[] {
+  return mock.mock.calls.map((call) => String(call[0]));
+}
+
 export function renderApp(path = "/") {
   return render(
     <MemoryRouter initialEntries={[path]}>

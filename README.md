@@ -46,7 +46,7 @@ The same page below the fold: throughput, latency, where the shipments are, and 
 
 ![The Browse page: totals, a status donut, shipments by carrier, and a filterable table of shipments](docs/images/ui-browse.png)
 
-**Track.** The original lookup, and links to the other pages. The footer names the stack that served it.
+**Track.** The original lookup, the five newest shipments as quick links (ADR-0029), and links to the other pages. The footer names the stack that served it.
 
 ![The Track page: a tracking number field, recent lookups, and cards linking to Live, Browse, New shipment, and System](docs/images/ui-track.png)
 

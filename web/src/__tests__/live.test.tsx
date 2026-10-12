@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AUTO_STOP_MS, MAX_CREATED, percentile, TrafficEngine, type TrafficApi } from "../live/engine";
+import { AUTO_STOP_MS, CARRIERS, MAX_CREATED, percentile, TrafficEngine, type TrafficApi } from "../live/engine";
 import { RuntimeProvider } from "../live/runtime";
 import { ShipmentStore } from "../live/store";
 import { LivePage } from "../pages/LivePage";
@@ -26,13 +26,17 @@ function shipmentRow(id: string, trackingNumber: string) {
   };
 }
 
-function fakeApi(options: { applyAfterMs?: number; failCreate?: boolean; neverApply?: boolean } = {}) {
+function fakeApi(
+  options: { applyAfterMs?: number; failCreate?: boolean; neverApply?: boolean; postDelayMs?: number } = {},
+) {
   const applyAfter = options.applyAfterMs ?? 300;
   const status = new Map<string, string>();
   const accepted: { id: string; type: string; key: string; at: number }[] = [];
+  const carriers: string[] = [];
   let seq = 0;
   const api: TrafficApi = {
-    createShipment() {
+    createShipment(carrier) {
+      carriers.push(carrier);
       if (options.failCreate === true) {
         return Promise.resolve({ ok: false as const, message: "boom", status: 500 });
       }
@@ -52,14 +56,21 @@ function fakeApi(options: { applyAfterMs?: number; failCreate?: boolean; neverAp
           status.set(id, type);
         }, applyAfter);
       }
-      return Promise.resolve({ ok: true as const, stack: "modern" });
+      const answer = { ok: true as const, stack: "modern" };
+      if (options.postDelayMs === undefined) return Promise.resolve(answer);
+      // A slow write, so that other dispatches run while this one is waiting.
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(answer);
+        }, options.postDelayMs);
+      });
     },
     track(trackingNumber) {
       const id = `id-${Number(trackingNumber.slice(2))}`;
       return Promise.resolve({ ok: true as const, status: (status.get(id) ?? "CREATED") as never, stack: "modern" });
     },
   };
-  return { api, accepted };
+  return { api, accepted, carriers };
 }
 
 /** A small deterministic generator, so that a test never depends on luck. */
@@ -206,6 +217,44 @@ describe("traffic engine", () => {
     expect(rows.some((r) => r.status !== "CREATED")).toBe(true);
   });
 
+  it.each(SEEDS)("sends every event of a lifecycle in order, even when dispatches overlap (seed %i)", async (seed) => {
+    const { api, accepted } = fakeApi({ postDelayMs: 150 });
+    const engine = engineFor(api, seed);
+    engine.setRate(40);
+    engine.start();
+    await run(40_000);
+    engine.stop();
+
+    // One entry per shipment and key: a repeat of the same key is a duplicate, not a new event.
+    const byShipment = new Map<string, string[]>();
+    const seen = new Set<string>();
+    for (const e of accepted) {
+      if (seen.has(e.key)) continue;
+      seen.add(e.key);
+      byShipment.set(e.id, [...(byShipment.get(e.id) ?? []), e.type]);
+    }
+    const happy = ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"];
+    const exception = ["PICKED_UP", "IN_TRANSIT", "EXCEPTION"];
+    expect(byShipment.size).toBeGreaterThan(5);
+    for (const [id, types] of byShipment) {
+      const ok = happy.slice(0, types.length).join() === types.join() || exception.slice(0, types.length).join() === types.join();
+      expect(ok, `${id} sent ${types.join(", ")}`).toBe(true);
+    }
+  });
+
+  it.each(SEEDS)("spreads the shipments it creates across the seeded carriers (seed %i)", async (seed) => {
+    const { api, carriers } = fakeApi();
+    const engine = engineFor(api, seed);
+    engine.setRate(15);
+    engine.start();
+    await run(30_000);
+    engine.stop();
+
+    expect(carriers.length).toBeGreaterThan(20);
+    expect(new Set(carriers).size).toBeGreaterThanOrEqual(4);
+    expect(carriers.every((c) => CARRIERS.includes(c))).toBe(true);
+  });
+
   it("stops creating at its cap and then stops itself", async () => {
     const engine = engineFor(fakeApi({ applyAfterMs: 50 }).api, 5);
     engine.setRate(20);
@@ -271,6 +320,26 @@ describe("live page", () => {
     const board = screen.getByRole("group", { name: "Shipments by status" });
     const rate = screen.getByText("Requests per second");
     expect(board.compareDocumentPosition(rate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("labels each throughput line with its own rate for the last second", async () => {
+    const engine = engineFor(fakeApi().api);
+    const user = userEvent.setup();
+    renderLive(engine);
+    await user.click(screen.getByRole("button", { name: /Start traffic/ }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    });
+    await user.click(screen.getByRole("button", { name: /Stop traffic/ }));
+
+    expect(screen.getByText(/^requests · \d+\/s$/)).toBeVisible();
+    expect(screen.getByText(/^errors · 0\/s$/)).toBeVisible();
+    expect(screen.queryByText(/errors · [1-9]\d* in the last second/)).not.toBeInTheDocument();
+  });
+
+  it("names the carriers it uses", () => {
+    renderLive(engineFor(fakeApi().api));
+    expect(screen.getByText(/carriers ACME, BOLT, CRWN, MFLT, ZZTEST/)).toBeVisible();
   });
 
   it("changes the rate with the slider", () => {

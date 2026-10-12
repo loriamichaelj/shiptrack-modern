@@ -254,3 +254,26 @@ describe("system page and the activity panel", () => {
     });
   });
 });
+
+describe("shipment store", () => {
+  const row = (id: string, createdAt: string) =>
+    shipment({ id, tracking_number: `MF${id.replace(/\D/g, "").padStart(10, "0")}`, created_at: createdAt });
+
+  it("drops what a complete read no longer lists, and keeps what was touched during it", () => {
+    const store = new ShipmentStore();
+    store.merge([row("s1", "2026-10-10T10:00:00Z"), row("s2", "2026-10-10T11:00:00Z")] as never, 1_000);
+    store.add(row("s3", "2026-10-10T12:00:00Z") as never, 5_000);
+
+    // A read began at 4_000 and listed only s2: s1 was deleted, and s3 arrived after the read began.
+    store.retain(new Set(["s2"]), 4_000);
+
+    expect(store.getRows().map((r) => r.id).sort()).toEqual(["s2", "s3"]);
+  });
+
+  it("keeps everything the read listed", () => {
+    const store = new ShipmentStore();
+    store.merge([row("s1", "2026-10-10T10:00:00Z")] as never, 1_000);
+    store.retain(new Set(["s1"]), 9_000);
+    expect(store.size).toBe(1);
+  });
+});

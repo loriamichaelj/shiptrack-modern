@@ -126,6 +126,22 @@ export class ShipmentStore {
     return true;
   }
 
+  /**
+   * After a complete read of the server's list: drop what it no longer lists, such as shipments a
+   * data reset deleted. A row touched since the read began is kept, because it may have been created
+   * after the server answered the page that would have shown it.
+   */
+  retain(seen: ReadonlySet<string>, readStartedAt: number): void {
+    let any = false;
+    for (const [id, row] of this.rows) {
+      if (!seen.has(id) && row.touchedAt < readStartedAt) {
+        this.rows.delete(id);
+        any = true;
+      }
+    }
+    if (any) this.changed();
+  }
+
   setSync(next: Partial<SyncState>): void {
     this.sync = { ...this.sync, ...next };
     this.listeners.forEach((listener) => {

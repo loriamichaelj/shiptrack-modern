@@ -1084,6 +1084,17 @@ pre {
   border-radius: 0.2rem;
 }
 
+.throughput-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 1.2rem;
+}
+
+.throughput-legend .swatch { margin-left: 0; }
+
+.legend-note { margin-left: auto; font-size: 0.85rem; }
+
 .line-blue-bg { background: var(--accent); }
 .line-red-bg { background: var(--s-exception); }
 
@@ -1131,12 +1142,22 @@ pre {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(6, minmax(8rem, 1fr));
+  grid-template-columns: repeat(6, minmax(9.5rem, 1fr));
   gap: 0.6rem;
   overflow-x: auto;
 }
 
+/* Two rows of three below a width where six columns would need to scroll, and two across on a phone. */
+@media (max-width: 68rem) {
+  .board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 34rem) {
+  .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .column {
+  min-width: 0;
   min-height: 10rem;
   padding: 0.5rem;
   background: color-mix(in srgb, var(--tone, var(--line)) 7%, var(--bg));
@@ -1151,15 +1172,25 @@ pre {
 .column-delivered { --tone: var(--s-delivered); }
 .column-exception { --tone: var(--s-exception); }
 
+/* A badge such as "Out for delivery" can be as wide as a column: the count wraps under it
+   instead of spilling over the column's edge. */
 .column-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.3rem;
+  gap: 0.2rem 0.4rem;
   margin-bottom: 0.5rem;
 }
 
+.column-head .badge {
+  max-width: 100%;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.85rem;
+}
+
 .column-count {
+  margin-left: auto;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }

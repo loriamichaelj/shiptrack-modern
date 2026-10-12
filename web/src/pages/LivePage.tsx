@@ -7,7 +7,7 @@ import { StatCard } from "../components/StatCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { statusLabel } from "../format";
 import { Icon } from "../icons";
-import { MAX_RATE, MIN_RATE, type FeedItem, type Snapshot } from "../live/engine";
+import { CARRIERS, MAX_RATE, MIN_RATE, type FeedItem, type Snapshot } from "../live/engine";
 import { useRuntime, useEngine } from "../live/runtime";
 import { useStack } from "../stack";
 import { STATUS_ORDER } from "../stats";
@@ -108,7 +108,7 @@ export function LivePage() {
           <Icon name="refresh" size={16} /> Reset
         </button>
         <span className="muted">
-          {snap.inFlight} in flight · served by <strong>{snap.stack ?? "unknown"}</strong> · carrier ZZTEST
+          {snap.inFlight} in flight · served by <strong>{snap.stack ?? "unknown"}</strong> · carriers {CARRIERS.join(", ")}
         </span>
       </div>
       {snap.stoppedBecause !== null && <p className="muted" role="status">{snap.stoppedBecause}</p>}
@@ -139,7 +139,11 @@ export function LivePage() {
               { label: "Errors", values: complete.map((s) => s.errors), className: "line-red" },
             ]}
           />
-          <p className="muted"><span className="swatch line-blue-bg" /> requests <span className="swatch line-red-bg" /> errors · {lastSecond?.requests ?? 0} in the last second</p>
+          <p className="throughput-legend muted">
+            <span className="legend-item"><span className="swatch line-blue-bg" /> requests · {lastSecond?.requests ?? 0}/s</span>
+            <span className="legend-item"><span className="swatch line-red-bg" /> errors · {lastSecond?.errors ?? 0}/s</span>
+            <span className="legend-note">last second</span>
+          </p>
         </div>
         <div className="card">
           <h2>Latency</h2>

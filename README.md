@@ -35,7 +35,7 @@ additions (design §1). The UI in `web/` is modern's own and is no longer held t
 |---|---|
 | `src/shiptrack/` | The application. `python -m shiptrack <api\|worker-events\|worker-notify\|sla-scan\|migrate>` selects the role |
 | `migrations/` | Alembic, the same lineage as legacy |
-| `web/` | The React UI: search, shipments dashboard, shipment detail with events and proof of delivery, new shipment, system and API explorer |
+| `web/` | The React UI: a live traffic page that drives and shows synthetic API traffic, a browsable shipments list, shipment detail with events and proof of delivery, new shipment, system and API explorer |
 | `tests/` | `unit/` and `integration/` (Postgres plus a moto server for SQS, S3, Secrets Manager, and EventBridge) |
 | `Dockerfile` | Builds the UI, installs from `uv.lock`, and runs as uid 10001 |
 | `compose.yaml` | Local only: the app, Postgres, and an AWS emulator |

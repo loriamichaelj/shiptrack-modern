@@ -1017,3 +1017,212 @@ pre {
     font-size: 0.6875rem;
   }
 }
+
+/* Live traffic */
+
+.live-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-left: 0.4rem;
+  background: var(--muted);
+  border-radius: 50%;
+}
+
+.live-dot.live-on {
+  background: var(--s-exception);
+  animation: live-pulse 1.4s ease-out infinite;
+}
+
+.live-label {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+
+.rate-label {
+  margin: 0;
+  font-weight: 500;
+}
+
+.controls input[type="range"] {
+  width: 12rem;
+  accent-color: var(--accent);
+}
+
+.linechart {
+  width: 100%;
+  height: auto;
+}
+
+.grid-line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.axis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.line-blue { stroke: var(--accent); }
+.line-red { stroke: var(--s-exception); }
+.line-violet { stroke: var(--s-in-transit); }
+
+.swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin: 0 0.2rem 0 0.6rem;
+  border-radius: 0.2rem;
+}
+
+.line-blue-bg { background: var(--accent); }
+.line-red-bg { background: var(--s-exception); }
+
+.feed {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.feed-row {
+  display: grid;
+  grid-template-columns: 1.4rem 8.2rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  border-left: 3px solid var(--tone, var(--line));
+  background: color-mix(in srgb, var(--tone, var(--line)) 8%, transparent);
+  border-radius: 0.35rem;
+  animation: feed-in 0.35s ease-out;
+}
+
+.feed-created { --tone: var(--accent); }
+.feed-event { --tone: var(--s-picked-up); }
+.feed-duplicate { --tone: var(--s-out-for-delivery); }
+.feed-applied { --tone: var(--s-delivered); }
+.feed-read { --tone: var(--s-created); }
+.feed-error { --tone: var(--s-exception); }
+
+.feed-icon {
+  display: grid;
+  place-items: center;
+  color: var(--tone);
+}
+
+.feed-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed-ms {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(8rem, 1fr));
+  gap: 0.6rem;
+  overflow-x: auto;
+}
+
+.column {
+  min-height: 10rem;
+  padding: 0.5rem;
+  background: color-mix(in srgb, var(--tone, var(--line)) 7%, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+}
+
+.column-created { --tone: var(--s-created); }
+.column-picked-up { --tone: var(--s-picked-up); }
+.column-in-transit { --tone: var(--s-in-transit); }
+.column-out-for-delivery { --tone: var(--s-out-for-delivery); }
+.column-delivered { --tone: var(--s-delivered); }
+.column-exception { --tone: var(--s-exception); }
+
+.column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.column-count {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.column-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.ship {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--tone, var(--line));
+  border-radius: 0.4rem;
+  animation: ship-in 0.4s ease-out;
+}
+
+.ship-pending {
+  animation: ship-wait 1s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--s-exception) 60%, transparent); }
+  100% { box-shadow: 0 0 0 0.7rem transparent; }
+}
+
+@keyframes feed-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ship-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ship-wait {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot.live-on,
+  .feed-row,
+  .ship,
+  .ship-pending {
+    animation: none;
+  }
+}
+
+.live-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.live-stats .stat-value {
+  font-size: 1.3rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 56rem) {
+  .live-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

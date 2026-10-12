@@ -311,9 +311,10 @@ URLs, cache headers, and HTML are identical to legacy (contract). The UI is not 
 
 | Route | Does | Calls |
 |---|---|---|
+| `/ui/live` | Starts and stops synthetic traffic from the browser (create, event, read) at 1 to 20 requests a second and shows it moving: throughput, latency, events applied against sent and the lag between them, a feed, and a board of shipments by status | `POST /api/v1/shipments`, `POST …/events`, `GET /api/v1/track/{n}` |
 | `/ui/` | Tracking-number search, recent searches, links | none |
 | `/ui/track/:trackingNumber` | Status, progress stepper, event timeline, auto-refresh every 30 s | `GET /api/v1/track/{n}` |
-| `/ui/shipments` | Counts, status and carrier charts, filters, overdue flags, up to 20 pages of 100 | `GET /api/v1/shipments` |
+| `/ui/shipments` | Browse: counts, status and carrier charts, filters, overdue flags; 50 pages of 100 at a time, with "Load more" because the list is oldest first | `GET /api/v1/shipments` |
 | `/ui/shipments/new` | Creates a shipment | `POST /api/v1/shipments` |
 | `/ui/shipments/:id` | Details, progress, history; sends an event with a generated `Idempotency-Key`; uploads proof of delivery (PDF, PNG, JPEG, up to 10 MiB) and opens it | `GET /api/v1/shipments/{id}`, `POST …/events`, `POST …/pod`, `GET …/pod/{doc}` |
 | `/ui/system` | Readiness, the serving stack, and an explorer of four read-only calls | `GET /readyz`, `/healthz`, `/api/v1/shipments?limit=3`, `/api/v1/track/{unknown}` |

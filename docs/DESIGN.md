@@ -311,15 +311,15 @@ URLs, cache headers, and HTML are identical to legacy (contract). The UI is not 
 
 | Route | Does | Calls |
 |---|---|---|
-| `/ui/live` | Starts and stops synthetic traffic from the browser (create, event, read) at 1 to 20 requests a second and shows it moving: throughput, latency, events applied against sent and the lag between them, a feed, and a board of shipments by status | `POST /api/v1/shipments`, `POST …/events`, `GET /api/v1/track/{n}` |
+| `/ui/live` | Starts and stops synthetic traffic from the browser (create, event, read) at 1 to 20 requests a second and shows it moving: the board of shipments by status first, then throughput, latency, events applied against sent and the lag between them, and a feed. Traffic keeps running when another page is open | `POST /api/v1/shipments`, `POST …/events`, `GET /api/v1/track/{n}` |
 | `/ui/` | Tracking-number search, recent searches, links | none |
 | `/ui/track/:trackingNumber` | Status, progress stepper, event timeline, auto-refresh every 30 s | `GET /api/v1/track/{n}` |
-| `/ui/shipments` | Browse: counts, status and carrier charts, filters, overdue flags; 50 pages of 100 at a time, with "Load more" because the list is oldest first | `GET /api/v1/shipments` |
+| `/ui/shipments` | Browse: every shipment, with counts, status and carrier charts, filters, and overdue flags. It reads all pages of the list (oldest first, no total) and again every 15 s, and shows what the live page creates and moves as it happens | `GET /api/v1/shipments` |
 | `/ui/shipments/new` | Creates a shipment | `POST /api/v1/shipments` |
 | `/ui/shipments/:id` | Details, progress, history; sends an event with a generated `Idempotency-Key`; uploads proof of delivery (PDF, PNG, JPEG, up to 10 MiB) and opens it | `GET /api/v1/shipments/{id}`, `POST …/events`, `POST …/pod`, `GET …/pod/{doc}` |
-| `/ui/system` | Readiness, the serving stack, and an explorer of four read-only calls | `GET /readyz`, `/healthz`, `/api/v1/shipments?limit=3`, `/api/v1/track/{unknown}` |
+| `/ui/system` | Readiness, the serving stack, every API call made since the page loaded (the list keeps the latest 200), the shipments held in the browser and when they were last synced, and an explorer of four read-only calls | `GET /readyz`, `/healthz`, `/api/v1/shipments?limit=3`, `/api/v1/track/{unknown}` |
 
-An **API activity** panel lists every call the page made (method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the bodies). The stack badge asks for the UI's own base path on load and reads `X-ShipTrack-Stack`. Charts are SVG with presentation attributes and icons are inline SVG, so the CSP below needs no allowance; a document is shown by its same-origin URL (`img-src 'self'`), never a `blob:` URL.
+An **API activity** panel lists the latest 200 calls the page made (method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the bodies); the totals are counted separately and are not capped. The stack badge asks for the UI's own base path on load and reads `X-ShipTrack-Stack`. Charts are SVG with presentation attributes and icons are inline SVG, so the CSP below needs no allowance; a document is shown by its same-origin URL (`img-src 'self'`), never a `blob:` URL.
 
 **Security headers** (middleware, every port-8000 response):
 - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`

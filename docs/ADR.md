@@ -29,6 +29,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0023 | `contract-migration-not-taken` | Accepted |
 | 0024 | `modern-ui-is-its-own` | Accepted |
 | 0025 | `synthetic-traffic-from-the-browser` | Accepted |
+| 0026 | `one-runtime-for-live-and-browse` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -338,3 +339,18 @@ Conditions:
 - No endpoint, header, or field is added.
 
 **Consequences:** It writes real rows to the shared database, which stay: nothing deletes them, and they are isolated only by the carrier code. The numbers are what this browser sees, so latency includes its distance to the load balancer; the apply lag (a `202` to the shipment showing the event) is measured by polling, to a resolution of a few hundred milliseconds. It shows only its own traffic, not other clients'. Throughput is limited by one browser; the k6 baseline remains the way to load the system.
+
+## ADR-0026: one-runtime-for-live-and-browse
+
+**Status:** Accepted
+
+**Context:** The first live page owned its traffic engine, stopped it when the page was left, and kept its shipments to itself, while Browse read its own copy of the list from the server through a page cap. A shipment created on Live was not on Browse until a reload, traffic could not outlive the page, and the System page counted at most the 60 calls its log kept. The owner asked for the pages to agree and for traffic to continue across pages. The owner also asked for the data already in the database to be kept, so nothing is deleted.
+
+**Decision:**
+- One runtime, held above the router: the traffic engine and a shipment store. The engine writes what it creates and reads to the store; Browse and System read the store; Browse also reads the server's list into it, all pages, on load and every 15 s. A status is never moved backwards by a late read.
+- Traffic is not stopped when a page is left. The header shows it while it runs, with a stop control. A run stops by itself after an hour or after 1,000 shipments created, and its rate follows the clock, so a background tab, whose timers run about once a second, keeps the rate.
+- Browse has no page cap and no "load more": its list is complete when the server stops returning a cursor.
+- "Fresh at zero" is the live view's: its counters and board start empty and Reset empties them. The shipments already in the database stay and are shown by Browse.
+- API call totals are counted separately from the list of recent calls, which keeps 200.
+
+**Consequences:** Browse reads the whole list, so its cost grows with the data: one request per 100 shipments, repeated every 15 s while it is open. The cap of 1,000 created per run bounds what the live traffic adds, and nothing deletes rows, so the list only grows. A second tab runs its own engine and store; the two agree through the server's list within 15 s, and not instantly.

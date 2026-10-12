@@ -17,10 +17,19 @@ export interface ApiCall {
   note: string | null;
 }
 
-const MAX_CALLS = 60;
+/** How many calls are kept to look at. The totals below are not limited by it. */
+export const MAX_CALLS = 200;
 const MAX_BODY = 4000;
 
+export interface ApiTotals {
+  calls: number;
+  failed: number;
+  totalMs: number;
+  since: number | null;
+}
+
 let calls: ApiCall[] = [];
+let totals: ApiTotals = { calls: 0, failed: 0, totalMs: 0, since: null };
 let nextId = 1;
 const listeners = new Set<() => void>();
 
@@ -35,8 +44,14 @@ export function getApiCalls(): readonly ApiCall[] {
   return calls;
 }
 
+/** Every call since the page loaded, however many are still kept in the list. */
+export function getApiTotals(): ApiTotals {
+  return totals;
+}
+
 export function clearApiCalls(): void {
   calls = [];
+  totals = { calls: 0, failed: 0, totalMs: 0, since: null };
   emit();
 }
 
@@ -52,12 +67,23 @@ export function useApiCalls(): readonly ApiCall[] {
   return useSyncExternalStore(subscribe, getApiCalls, getApiCalls);
 }
 
+export function useApiTotals(): ApiTotals {
+  return useSyncExternalStore(subscribe, getApiTotals, getApiTotals);
+}
+
 function truncate(text: string): string {
   return text.length > MAX_BODY ? `${text.slice(0, MAX_BODY)}\n… ${text.length - MAX_BODY} more characters` : text;
 }
 
 function record(call: Omit<ApiCall, "id" | "at">): void {
-  calls = [{ id: nextId, at: Date.now(), ...call }, ...calls].slice(0, MAX_CALLS);
+  const at = Date.now();
+  calls = [{ id: nextId, at, ...call }, ...calls].slice(0, MAX_CALLS);
+  totals = {
+    calls: totals.calls + 1,
+    failed: totals.failed + (call.ok ? 0 : 1),
+    totalMs: totals.totalMs + call.ms,
+    since: totals.since ?? at,
+  };
   nextId += 1;
   emit();
 }

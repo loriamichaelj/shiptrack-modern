@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { ApiCallRow } from "../components/ApiInspector";
-import { getApiCalls, loggedFetch, useApiCalls, type ApiCall } from "../apiLog";
+import { getApiCalls, loggedFetch, MAX_CALLS, useApiCalls, useApiTotals, type ApiCall } from "../apiLog";
 import { readiness } from "../client";
 import { Icon } from "../icons";
 import { StatCard } from "../components/StatCard";
+import { useShipments, useSync } from "../live/runtime";
 import { useStack } from "../stack";
+import { relativeTime } from "../stats";
+import { useNow } from "../useNow";
 
 interface Health {
   ready: boolean | null;
@@ -25,6 +28,10 @@ export const EXPLORER_CALLS = [
 export function SystemPage() {
   const { setStack } = useStack();
   const calls = useApiCalls();
+  const totals = useApiTotals();
+  const rows = useShipments();
+  const sync = useSync();
+  const now = useNow();
   const [health, setHealth] = useState<Health>({ ready: null, reason: null, ms: null, stack: null, error: null });
   const [last, setLast] = useState<ApiCall | null>(null);
 
@@ -69,7 +76,24 @@ export function SystemPage() {
         />
         <StatCard icon="server" label="Served by" value={health.stack ?? "unknown"} tone="violet" />
         <StatCard icon="activity" label="Readiness latency" value={health.ms === null ? "…" : `${health.ms} ms`} tone="blue" />
-        <StatCard icon="database" label="Calls this session" value={calls.length} tone="slate" />
+        <StatCard
+          icon="database"
+          label="API calls this session"
+          value={totals.calls}
+          hint={`${totals.failed} failed · avg ${totals.calls === 0 ? 0 : Math.round(totals.totalMs / totals.calls)} ms`}
+          tone="slate"
+        />
+        <StatCard
+          icon="package"
+          label="Shipments in this browser"
+          value={rows.length}
+          hint={
+            sync.lastSyncedAt === null
+              ? "not synced with the server yet"
+              : `synced ${relativeTime(new Date(sync.lastSyncedAt).toISOString(), now)}`
+          }
+          tone="blue"
+        />
       </div>
       <p>
         <button type="button" className="ghost" onClick={() => { setChecks((n) => n + 1); }}>
@@ -88,6 +112,10 @@ export function SystemPage() {
           ))}
         </div>
         {last !== null && <ApiCallRow key={last.id} call={last} />}
+        <p className="muted">
+          The list keeps the latest {MAX_CALLS} calls ({calls.length} now); the count above is every call since the page
+          loaded.
+        </p>
       </div>
     </section>
   );

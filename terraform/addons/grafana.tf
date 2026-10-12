@@ -62,6 +62,9 @@ resource "helm_release" "grafana" {
     # viewers_can_edit also lets a viewer open Explore, the query UI for the managed Prometheus; the
     # provisioned dashboards cannot be saved over (editable = false, disableDeletion).
     "grafana.ini" = {
+      # Grafana OSS ignores a datasource's SigV4 setting unless this is on, and sends the query
+      # unsigned, which the managed Prometheus answers with 403 "Missing Authentication Token".
+      auth = { sigv4_auth_enabled = true }
       "auth.anonymous" = {
         enabled  = true
         org_role = "Viewer"

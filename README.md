@@ -35,7 +35,7 @@ additions (design §1). The UI in `web/` is modern's own and is no longer held t
 |---|---|
 | `src/shiptrack/` | The application. `python -m shiptrack <api\|worker-events\|worker-notify\|sla-scan\|migrate>` selects the role |
 | `migrations/` | Alembic, the same lineage as legacy |
-| `web/` | The React UI: a live traffic page that drives synthetic API traffic and shows shipments moving through their statuses, a Browse list that shows the same shipments as they change, shipment detail with events and proof of delivery, new shipment, and a system page with the API call totals and an API explorer |
+| `web/` | The React UI: a live traffic page that drives synthetic API traffic and shows shipments moving through their statuses, a Browse list that shows the same shipments as they change, shipment detail with events and proof of delivery, new shipment, and a system page with the API call totals and an API explorer. Nothing in the API deletes shipments; the platform's `ops-reset-data` clears them |
 | `tests/` | `unit/` and `integration/` (Postgres plus a moto server for SQS, S3, Secrets Manager, and EventBridge) |
 | `Dockerfile` | Builds the UI, installs from `uv.lock`, and runs as uid 10001 |
 | `compose.yaml` | Local only: the app, Postgres, and an AWS emulator |

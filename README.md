@@ -29,6 +29,27 @@ additions (design §1). The UI in `web/` is modern's own and is no longer held t
 | UI and headers | Served by the API from the image, with a strict CSP and security headers (REM-16) |
 | Delivery | A multi-arch, non-root image by digest; a Helm chart; Terraform for the cluster; pipelines through OIDC |
 
+## The UI
+
+Modern's UI is its own (ADR-0024). It drives synthetic traffic through the public API from the
+browser, so the pages move as the answers arrive (ADR-0025, ADR-0026).
+
+**Live traffic.** Shipments move through their statuses as events are accepted and then applied.
+
+![The live traffic page: a board of shipments by status, with the traffic controls and the request, success, latency, and apply-lag tiles](docs/images/ui-live.png)
+
+The same page below the fold: throughput, latency, where the shipments are, and the feed of each call.
+
+![The live traffic page's throughput and latency charts, the shipments-by-status donut, and the live feed of accepted and applied events](docs/images/ui-live-charts.png)
+
+**Browse.** Every shipment, in step with the server, with counts by status and carrier and filters.
+
+![The Browse page: totals, a status donut, shipments by carrier, and a filterable table of shipments](docs/images/ui-browse.png)
+
+**Track.** The original lookup, and links to the other pages. The footer names the stack that served it.
+
+![The Track page: a tracking number field, recent lookups, and cards linking to Live, Browse, New shipment, and System](docs/images/ui-track.png)
+
 ## Layout
 
 | Path | What it holds |

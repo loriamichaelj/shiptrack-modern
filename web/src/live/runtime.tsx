@@ -70,6 +70,8 @@ export function useServerSync(everyMs: number): { refresh: () => void } {
     const controller = new AbortController();
     void (async () => {
       store.setSync({ syncing: true, pagesRead: 0, error: null });
+      const startedAt = Date.now();
+      const seen = new Set<string>();
       let cursor: string | null = null;
       let pages = 0;
       for (;;) {
@@ -88,11 +90,13 @@ export function useServerSync(everyMs: number): { refresh: () => void } {
         if (result.stack !== null) setStack(result.stack);
         const items: Shipment[] = result.data.items;
         store.merge(items, Date.now());
+        items.forEach((item) => seen.add(item.id));
         pages += 1;
         store.setSync({ pagesRead: pages });
         if (result.data.next_cursor === null) break;
         cursor = result.data.next_cursor;
       }
+      store.retain(seen, startedAt);
       store.setSync({ syncing: false, lastSyncedAt: Date.now(), error: null });
     })();
     return () => {

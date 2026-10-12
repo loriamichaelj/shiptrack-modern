@@ -1,28 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { isValidTrackingNumber, normalizeTrackingNumber } from "../api";
+import { statusLabel } from "../format";
 import { Icon, type IconName } from "../icons";
+import { useServerSync, useShipments } from "../live/runtime";
 
 export const SEARCH_ERROR = "Enter a tracking number: MF followed by 10 digits.";
-const RECENT_KEY = "shiptrack.recent";
-
-function readRecent(): string[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string").slice(0, 5) : [];
-  } catch {
-    return [];
-  }
-}
-
-function remember(trackingNumber: string): void {
-  try {
-    const next = [trackingNumber, ...readRecent().filter((n) => n !== trackingNumber)].slice(0, 5);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-  } catch {
-    /* private mode: nothing is remembered */
-  }
-}
+/** How many of the newest shipments the page offers as quick links. */
+const RECENT_COUNT = 5;
 
 const FEATURES: { to: string; icon: IconName; title: string; text: string }[] = [
   { to: "/live", icon: "activity", title: "Live traffic", text: "Watch synthetic traffic move through the API in real time." },
@@ -35,7 +20,10 @@ export function SearchPage() {
   const navigate = useNavigate();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [recent] = useState(readRecent);
+  // The newest shipments the server has, not what was typed here: a lookup that was deleted, or
+  // made in another browser, would be the wrong thing to offer. Read from the shared store.
+  useServerSync(30_000);
+  const recent = useShipments().slice(0, RECENT_COUNT);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,7 +33,6 @@ export function SearchPage() {
       return;
     }
     setError(null);
-    remember(trackingNumber);
     void navigate(`/track/${trackingNumber}`);
   }
 
@@ -85,9 +72,9 @@ export function SearchPage() {
         {recent.length > 0 && (
           <div className="recent">
             <span className="muted">Recent</span>
-            {recent.map((number) => (
-              <Link key={number} to={`/track/${number}`} className="chip mono">
-                {number}
+            {recent.map((row) => (
+              <Link key={row.id} to={`/track/${row.trackingNumber}`} className="chip mono" title={`${statusLabel(row.status)}, ${row.carrier}`}>
+                {row.trackingNumber}
               </Link>
             ))}
           </div>

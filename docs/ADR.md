@@ -31,6 +31,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0025 | `synthetic-traffic-from-the-browser` | Accepted |
 | 0026 | `one-runtime-for-live-and-browse` | Accepted |
 | 0027 | `grafana-opens-on-the-alb-with-read-only-viewers` | Accepted |
+| 0028 | `synthetic-traffic-uses-the-seeded-carriers` | Accepted |
+| 0029 | `recent-shipments-come-from-the-server` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -335,7 +337,7 @@ Conditions:
 
 **Decision:**
 - The live page generates the traffic itself, from the browser, through the same public endpoints as any client: create a shipment, send tracking events with an `Idempotency-Key` (some are sent twice), and read the track view. It watches the result of its own calls.
-- It uses the carrier `ZZTEST`, which the platform's tests already use for data that is not real.
+- It uses the carrier `ZZTEST`, which the platform's tests already use for data that is not real. ADR-0028 spreads it across the seeded carriers.
 - It is bounded: 1 to 20 requests a second, 8 in flight, 120 shipments tracked, an automatic stop after 15 minutes, and a stop when the page is left.
 - No endpoint, header, or field is added.
 
@@ -371,3 +373,27 @@ Conditions:
 - The service-level panels read the nearest histogram buckets, `le="0.25"` for the 300 ms track target (the stricter reading) and `le="60.0"` for 60 s of event freshness. The client library renders the bucket label as `60.0`.
 
 **Consequences:** Anyone who can send from a preview address can read the metrics and query them, over plain HTTP. They hold route templates, status classes, and counts, with no tracking numbers or secrets. Process panels (CPU, memory, descriptors) come from the client library's Linux collectors, and the board has nothing for node or pod resource use beyond that: Container Insights and the CloudWatch dashboard cover those. Grafana's data is not persisted, so a restart loses nothing that is not provisioned.
+
+## ADR-0028: synthetic-traffic-uses-the-seeded-carriers
+
+**Status:** Accepted
+
+**Context:** ADR-0025 gave the live page's shipments the carrier `ZZTEST`, so they could be told apart from real data. The result was that Browse's by-carrier chart showed one carrier with nearly everything, and the owner asked for the traffic to use the other carriers too.
+
+**Decision:**
+- Each shipment the page creates takes one of the five carriers migration 0001 seeds (`ACME`, `BOLT`, `CRWN`, `MFLT`, `ZZTEST`) at random. The API answers 422 for any other code, and has no endpoint to list or create carriers, so the codes are held in the page (`CARRIERS` in `web/src/live/engine.ts`).
+- The page names them in its controls.
+
+**Consequences:** Synthetic shipments can no longer be told apart from the five demo shipments by carrier, and a carrier added to the database is not used until the list changes. The platform's contract suite and the simulator are unaffected, and keep `ZZTEST` for their own data. The platform's `ops-reset-data` (platform ADR-0034) remains the way to clear all of it.
+
+## ADR-0029: recent-shipments-come-from-the-server
+
+**Status:** Accepted
+
+**Context:** The Track page's "Recent" chips were the tracking numbers typed into its search box in this browser, kept in `localStorage`. They were never checked, so they could name a shipment a data reset had deleted, and they ignored every shipment the live page created. The shared store also only ever added rows, so a shipment deleted on the server stayed in Browse and the board until the page was reloaded.
+
+**Decision:**
+- "Recent" is the five newest shipments the server lists, newest first, read into the shared store when the page opens and every 30 s. Typed lookups are no longer remembered.
+- A complete read of the server's list now removes what the server no longer lists, except rows touched since that read began, which may have been created after the server answered the page that would have shown them.
+
+**Consequences:** The Track page reads the whole list, one request per 100 shipments, like Browse does; the store is shared, so a page that has just synced costs nothing. After a reset the chips and Browse correct themselves within one read. A lookup made in this browser is no longer offered again.

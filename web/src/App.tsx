@@ -11,11 +11,28 @@ import { ShipmentDetailPage } from "./pages/ShipmentDetailPage";
 import { ShipmentsPage } from "./pages/ShipmentsPage";
 import { SystemPage } from "./pages/SystemPage";
 import { TrackPage } from "./pages/TrackPage";
+import { RuntimeProvider, useEngine, useRuntime } from "./live/runtime";
 import { StackProvider } from "./stack";
+
+/** Shown on every page while traffic is running, with a way to stop it. */
+function LivePill() {
+  const { engine } = useRuntime();
+  const snap = useEngine();
+  if (!snap.running) return null;
+  return (
+    <span className="live-pill">
+      <span className="live-dot live-on" aria-hidden="true" /> LIVE · {snap.rate}/s
+      <button type="button" className="ghost" onClick={() => { engine.stop(); }}>
+        Stop
+      </button>
+    </span>
+  );
+}
 
 export function App() {
   const [inspecting, setInspecting] = useState(false);
   return (
+    <RuntimeProvider>
     <StackProvider>
       <div className="app">
         <header className="app-header">
@@ -30,6 +47,7 @@ export function App() {
             <NavLink to="/shipments/new">New shipment</NavLink>
             <NavLink to="/system">System</NavLink>
           </nav>
+          <LivePill />
           <button
             type="button"
             className="ghost inspector-toggle"
@@ -59,5 +77,6 @@ export function App() {
         </footer>
       </div>
     </StackProvider>
+    </RuntimeProvider>
   );
 }

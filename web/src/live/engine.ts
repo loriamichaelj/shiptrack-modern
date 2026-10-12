@@ -1,5 +1,6 @@
 import type { ShipmentStatus } from "../api";
-import type { EventType } from "../client";
+import type { EventType, Shipment } from "../client";
+import type { ShipmentStore } from "./store";
 
 /** One line of the live feed. */
 export interface FeedItem {
@@ -59,7 +60,7 @@ export interface TrafficApi {
 }
 
 export type CreateResult =
-  | { ok: true; id: string; trackingNumber: string; stack: string | null }
+  | { ok: true; shipment: Shipment; stack: string | null }
   | { ok: false; message: string; status: number | null };
 export type EventResult = { ok: true; stack: string | null } | { ok: false; message: string; status: number | null };
 export type TrackResult =
@@ -79,7 +80,10 @@ const FEED_LENGTH = 60;
 const STALL_MS = 30_000;
 const POLL_MS = 400;
 const WINDOW_SECONDS = 60;
-export const AUTO_STOP_MS = 15 * 60 * 1000;
+/** A run stops by itself after this long, so that a forgotten tab does not write for ever. */
+export const AUTO_STOP_MS = 60 * 60 * 1000;
+/** A run creates at most this many shipments. Browse reads all of them, so the number is bounded. */
+export const MAX_CREATED = 1000;
 const CITIES = ["Rotterdam", "Hamburg", "Leeds", "Cardiff", "Lyon", "Gdansk", "Bilbao", "Antwerp"];
 const HAPPY: EventType[] = ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"];
 const EXCEPTION_PATH: EventType[] = ["PICKED_UP", "IN_TRANSIT", "EXCEPTION"];
@@ -130,6 +134,7 @@ export class TrafficEngine {
   private lags: number[] = [];
   private totals = { requests: 0, errors: 0, created: 0, eventsSent: 0, duplicates: 0, applied: 0, reads: 0 };
   private budget = 0;
+  private lastTick = 0;
   private inFlight = 0;
   private rate = 5;
   private startedAt: number | null = null;
@@ -138,10 +143,16 @@ export class TrafficEngine {
   private stoppedBecause: string | null = null;
   private snapshot: Snapshot;
   private carrier = "ZZTEST";
+  private readonly store: ShipmentStore | null;
 
-  constructor(api: TrafficApi, clock: Clock = { now: () => Date.now(), random: () => Math.random() }) {
+  constructor(
+    api: TrafficApi,
+    clock: Clock = { now: () => Date.now(), random: () => Math.random() },
+    store: ShipmentStore | null = null,
+  ) {
     this.api = api;
     this.clock = clock;
+    this.store = store;
     this.snapshot = this.build();
   }
 
@@ -164,6 +175,7 @@ export class TrafficEngine {
     const now = this.clock.now();
     this.startedAt ??= now;
     this.runningSince = now;
+    this.lastTick = now;
     this.stoppedBecause = null;
     this.timer = setInterval(() => {
       this.tick();
@@ -200,15 +212,24 @@ export class TrafficEngine {
   private tick(): void {
     const now = this.clock.now();
     if (now - this.runningSince > AUTO_STOP_MS) {
-      this.stop("Stopped after 15 minutes, so that a forgotten tab does not keep generating data.");
+      this.stop("Stopped after an hour, so that a forgotten tab does not keep generating data.");
       return;
     }
-    this.budget += this.rate / 10;
+    // The budget follows the clock and not the number of ticks: a background tab runs its timers
+    // about once a second, and counting ticks would make the rate a tenth of what was asked.
+    const elapsed = Math.max(0, now - this.lastTick);
+    this.lastTick = now;
+    // Decided before this tick starts anything, while nothing is in flight to make it look busy.
+    if (this.totals.created >= MAX_CREATED && this.inFlight === 0 && !this.tracked.some((s) => !s.done)) {
+      this.stop(`Reached ${MAX_CREATED} shipments. Press Reset to count from zero again.`);
+      return;
+    }
+    this.budget += (this.rate * elapsed) / 1000;
     while (this.budget >= 1 && this.inFlight < MAX_IN_FLIGHT) {
       this.budget -= 1;
       void this.dispatch();
     }
-    this.budget = Math.min(this.budget, this.rate);
+    this.budget = Math.min(this.budget, this.rate * 2);
     this.publish();
   }
 
@@ -228,10 +249,11 @@ export class TrafficEngine {
         .filter((s) => now - s.lastPoll >= POLL_MS)
         .sort((a, b) => (a.pendingSince ?? 0) - (b.pendingSince ?? 0));
       const roll = this.clock.random();
+      const canCreate = this.totals.created < MAX_CREATED;
       if (due.length > 0 && this.clock.random() < 0.8) {
         const first = due[0];
         if (first !== undefined) await this.read(first);
-      } else if (this.tracked.length < 4 || roll < 0.18 || (movable.length === 0 && pending.length === 0)) {
+      } else if (canCreate && (this.tracked.length < 4 || roll < 0.18 || (movable.length === 0 && pending.length === 0))) {
         await this.create();
       } else if (roll < 0.62 && movable.length > 0) {
         const shipment = this.pick(movable);
@@ -260,9 +282,10 @@ export class TrafficEngine {
     }
     this.stack = result.stack ?? this.stack;
     this.totals.created += 1;
+    this.store?.add(result.shipment, this.clock.now());
     this.tracked.push({
-      id: result.id,
-      trackingNumber: result.trackingNumber,
+      id: result.shipment.id,
+      trackingNumber: result.shipment.tracking_number,
       status: "CREATED",
       pending: null,
       pendingSince: null,
@@ -274,7 +297,7 @@ export class TrafficEngine {
       const drop = this.tracked.findIndex((s) => s.done);
       this.tracked.splice(drop === -1 ? 0 : drop, 1);
     }
-    this.log("created", result.trackingNumber, `${origin} → ${destination}`, ms, true);
+    this.log("created", result.shipment.tracking_number, `${origin} → ${destination}`, ms, true);
   }
 
   private async advance(shipment: Tracked): Promise<void> {
@@ -325,6 +348,9 @@ export class TrafficEngine {
     this.stack = result.stack ?? this.stack;
     const before = shipment.status;
     shipment.status = result.status;
+    this.store?.setStatus(shipment.id, result.status, this.clock.now());
+    // Seen delivered or in exception, by whichever read: it has nowhere further to go.
+    if (result.status === "DELIVERED" || result.status === "EXCEPTION") shipment.done = true;
     if (shipment.pending !== null && RANK[result.status] >= RANK[shipment.pending]) {
       const lag = this.clock.now() - (shipment.pendingSince ?? this.clock.now());
       this.lags.push(lag);

@@ -2,11 +2,30 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AUTO_STOP_MS, percentile, TrafficEngine, type TrafficApi } from "../live/engine";
+import { AUTO_STOP_MS, MAX_CREATED, percentile, TrafficEngine, type TrafficApi } from "../live/engine";
+import { RuntimeProvider } from "../live/runtime";
+import { ShipmentStore } from "../live/store";
 import { LivePage } from "../pages/LivePage";
 import { StackProvider } from "../stack";
 
 /** A fake API that applies each event after a fixed delay, like a queue and a worker would. */
+function shipmentRow(id: string, trackingNumber: string) {
+  return {
+    id,
+    tracking_number: trackingNumber,
+    carrier_code: "ZZTEST",
+    origin: "Leeds",
+    destination: "Cardiff",
+    status: "CREATED" as const,
+    promised_delivery_at: "2026-10-14T00:00:00Z",
+    estimated_delivery_at: null,
+    delivered_at: null,
+    sla_breached: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
 function fakeApi(options: { applyAfterMs?: number; failCreate?: boolean; neverApply?: boolean } = {}) {
   const applyAfter = options.applyAfterMs ?? 300;
   const status = new Map<string, string>();
@@ -20,7 +39,11 @@ function fakeApi(options: { applyAfterMs?: number; failCreate?: boolean; neverAp
       seq += 1;
       const id = `id-${seq}`;
       status.set(id, "CREATED");
-      return Promise.resolve({ ok: true as const, id, trackingNumber: `MF${String(seq).padStart(10, "0")}`, stack: "modern" });
+      return Promise.resolve({
+        ok: true as const,
+        shipment: shipmentRow(id, `MF${String(seq).padStart(10, "0")}`),
+        stack: "modern",
+      });
     },
     postEvent(id, type, _location, key) {
       accepted.push({ id, type, key, at: Date.now() });
@@ -50,8 +73,8 @@ function seeded(seed: number): () => number {
 
 const SEEDS = [1, 2, 3, 7, 42];
 
-function engineFor(api: TrafficApi, seed = 1): TrafficEngine {
-  return new TrafficEngine(api, { now: () => Date.now(), random: seeded(seed) });
+function engineFor(api: TrafficApi, seed = 1, store: ShipmentStore | null = null): TrafficEngine {
+  return new TrafficEngine(api, { now: () => Date.now(), random: seeded(seed) }, store);
 }
 
 describe("percentile", () => {
@@ -153,6 +176,46 @@ describe("traffic engine", () => {
     expect(snap.feed.some((f) => /not applied after 30 s/.test(f.text))).toBe(true);
   });
 
+  it("keeps the rate when its timer is slowed, as a background tab's is", async () => {
+    // A tab in the background runs timers about once a second, not ten times.
+    vi.useRealTimers();
+    vi.useFakeTimers();
+    const engine = engineFor(fakeApi().api);
+    engine.setRate(10);
+    engine.start();
+    for (let i = 0; i < 20; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
+    engine.stop();
+    // Twenty seconds at ten a second, with a tick a second: about 200, never about 20.
+    expect(engine.getSnapshot().totals.requests).toBeGreaterThan(120);
+  });
+
+  it("writes what it creates and reads to the shipment store, which the other pages show", async () => {
+    const store = new ShipmentStore();
+    const engine = engineFor(fakeApi().api, 3, store);
+    engine.setRate(15);
+    engine.start();
+    await run(20_000);
+    engine.stop();
+    const rows = store.getRows();
+    expect(rows.length).toBe(engine.getSnapshot().totals.created);
+    expect(rows.length).toBeGreaterThan(5);
+    expect(rows.some((r) => r.status !== "CREATED")).toBe(true);
+  });
+
+  it("stops creating at its cap and then stops itself", async () => {
+    const engine = engineFor(fakeApi({ applyAfterMs: 50 }).api, 5);
+    engine.setRate(20);
+    engine.start();
+    await run(AUTO_STOP_MS - 10_000);
+    const snap = engine.getSnapshot();
+    expect(snap.totals.created).toBeLessThanOrEqual(MAX_CREATED);
+    expect(snap.running).toBe(false);
+  });
+
   it("stops itself after the limit, so a forgotten tab does not keep writing", async () => {
     const engine = engineFor(fakeApi().api);
     engine.setRate(1);
@@ -160,7 +223,7 @@ describe("traffic engine", () => {
     await run(AUTO_STOP_MS + 5_000);
     const snap = engine.getSnapshot();
     expect(snap.running).toBe(false);
-    expect(snap.stoppedBecause).toMatch(/15 minutes/);
+    expect(snap.stoppedBecause).toMatch(/an hour/);
   });
 
   it("resets to nothing", async () => {
@@ -176,12 +239,14 @@ describe("traffic engine", () => {
 });
 
 describe("live page", () => {
-  function renderLive(engine: TrafficEngine) {
+  function renderLive(engine: TrafficEngine, store = new ShipmentStore()) {
     return render(
       <MemoryRouter>
-        <StackProvider>
-          <LivePage engineFor={() => engine} />
-        </StackProvider>
+        <RuntimeProvider runtime={{ engine, store }}>
+          <StackProvider>
+            <LivePage />
+          </StackProvider>
+        </RuntimeProvider>
       </MemoryRouter>,
     );
   }
@@ -200,25 +265,31 @@ describe("live page", () => {
     expect(engine.getSnapshot().running).toBe(false);
   });
 
+  it("puts the shipments' board above the numbers", () => {
+    const engine = engineFor(fakeApi().api);
+    renderLive(engine);
+    const board = screen.getByRole("group", { name: "Shipments by status" });
+    const rate = screen.getByText("Requests per second");
+    expect(board.compareDocumentPosition(rate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("changes the rate with the slider", () => {
     const engine = engineFor(fakeApi().api);
     renderLive(engine);
-    const slider = screen.getByLabelText(/Rate/);
     act(() => {
-      slider.focus();
       engine.setRate(12);
     });
     expect(screen.getByText("12 requests/s")).toBeVisible();
   });
 
-  it("stops the traffic when the page is left", () => {
+  it("keeps the traffic running when the page is left", () => {
     const engine = engineFor(fakeApi().api);
     const { unmount } = renderLive(engine);
     act(() => {
       engine.start();
     });
-    expect(engine.getSnapshot().running).toBe(true);
     unmount();
-    expect(engine.getSnapshot().running).toBe(false);
+    expect(engine.getSnapshot().running).toBe(true);
+    engine.stop();
   });
 });

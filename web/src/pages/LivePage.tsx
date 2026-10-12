@@ -1,4 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect } from "react";
+import { Link } from "react-router";
 import type { ShipmentStatus } from "../api";
 import { DonutChart } from "../components/Charts";
 import { LineChart } from "../components/LineChart";
@@ -6,8 +7,8 @@ import { StatCard } from "../components/StatCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { statusLabel } from "../format";
 import { Icon } from "../icons";
-import { realApi } from "../live/api";
-import { MAX_RATE, MIN_RATE, TrafficEngine, type FeedItem, type Snapshot } from "../live/engine";
+import { MAX_RATE, MIN_RATE, type FeedItem, type Snapshot } from "../live/engine";
+import { useRuntime, useEngine } from "../live/runtime";
 import { useStack } from "../stack";
 import { STATUS_ORDER } from "../stats";
 
@@ -26,21 +27,16 @@ function recentRate(snapshot: Snapshot): number {
   return last.length === 0 ? 0 : last.reduce((n, s) => n + s.requests, 0) / last.length;
 }
 
-export function LivePage({ engineFor }: { engineFor?: () => TrafficEngine }) {
-  const [engine] = useState(() => (engineFor ?? (() => new TrafficEngine(realApi)))());
-  const snap = useSyncExternalStore(engine.subscribe, engine.getSnapshot);
+export function LivePage() {
+  // The engine belongs to the app, not to this page: traffic started here keeps running while
+  // Browse or any other page is open, and Browse shows the same shipments as they change.
+  const { engine } = useRuntime();
+  const snap = useEngine();
   const { setStack } = useStack();
 
   useEffect(() => {
     if (snap.stack !== null) setStack(snap.stack);
   }, [snap.stack, setStack]);
-
-  // Leaving the page stops the traffic: nothing keeps writing in a tab nobody is looking at.
-  useEffect(() => {
-    return () => {
-      engine.stop();
-    };
-  }, [engine]);
 
   const okShare = snap.totals.requests === 0 ? 100 : Math.round(((snap.totals.requests - snap.totals.errors) / snap.totals.requests) * 100);
   const counts = Object.fromEntries(COLUMNS.map((s) => [s, snap.board.filter((c) => c.status === s).length])) as Record<ShipmentStatus, number>;
@@ -57,6 +53,30 @@ export function LivePage({ engineFor }: { engineFor?: () => TrafficEngine }) {
           <span className={`live-dot ${snap.running ? "live-on" : ""}`} aria-hidden="true" />
           <span className="live-label">{snap.running ? "LIVE" : "PAUSED"}</span>
         </h1>
+      </div>
+      <div className="card">
+        <h2>Shipments moving through their statuses</h2>
+        <div className="board" role="group" aria-label="Shipments by status">
+          {COLUMNS.map((status) => {
+            const cards = snap.board.filter((c) => c.status === status).slice(-14).reverse();
+            return (
+              <div key={status} className={`column column-${status.toLowerCase().replaceAll("_", "-")}`}>
+                <div className="column-head">
+                  <StatusBadge status={status} />
+                  <span className="column-count">{counts[status]}</span>
+                </div>
+                <div className="column-body">
+                  {cards.map((card) => (
+                    <span key={card.id} className={`ship mono ${card.pending !== null ? "ship-pending" : ""}`} title={card.pending !== null ? `${card.pending} accepted, not shown yet` : card.trackingNumber}>
+                      …{card.trackingNumber.slice(-5)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="muted">A pulsing chip has an event the API accepted that the shipment does not show yet: it is in the queue. The same shipments move on the <Link to="/shipments">Browse</Link> page.</p>
       </div>
       <p className="lede">
         This page makes real calls to the API from your browser: it creates shipments, sends tracking events, and reads them
@@ -160,30 +180,6 @@ export function LivePage({ engineFor }: { engineFor?: () => TrafficEngine }) {
         </div>
       </div>
 
-      <div className="card">
-        <h2>Shipments moving through their statuses</h2>
-        <div className="board" role="group" aria-label="Shipments by status">
-          {COLUMNS.map((status) => {
-            const cards = snap.board.filter((c) => c.status === status).slice(-14).reverse();
-            return (
-              <div key={status} className={`column column-${status.toLowerCase().replaceAll("_", "-")}`}>
-                <div className="column-head">
-                  <StatusBadge status={status} />
-                  <span className="column-count">{counts[status]}</span>
-                </div>
-                <div className="column-body">
-                  {cards.map((card) => (
-                    <span key={card.id} className={`ship mono ${card.pending !== null ? "ship-pending" : ""}`} title={card.pending !== null ? `${card.pending} accepted, not shown yet` : card.trackingNumber}>
-                      …{card.trackingNumber.slice(-5)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <p className="muted">A pulsing chip has an event the API accepted that the shipment does not show yet: it is in the queue.</p>
-      </div>
     </section>
   );
 }

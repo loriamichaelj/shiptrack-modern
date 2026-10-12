@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { getApiCalls } from "../apiLog";
 import { MemoryRouter } from "react-router";
+import { TrafficEngine } from "../live/engine";
+import { RuntimeProvider } from "../live/runtime";
+import { ShipmentStore } from "../live/store";
 import { ShipmentsPage } from "../pages/ShipmentsPage";
 import { StackProvider } from "../stack";
 import { jsonResponse, renderApp, stubFetch, trackView, TRACKING_NUMBER } from "./helpers";
@@ -48,7 +51,7 @@ describe("shipments page", () => {
     const user = userEvent.setup();
     renderApp("/shipments");
 
-    expect(await screen.findByText(/3 shipments loaded in 1 request/)).toBeVisible();
+    expect(await screen.findByText(/3 shipments, in step with the server/)).toBeVisible();
     expect(String(lastCall(fetchMock)[0])).toContain("/api/v1/shipments?limit=100");
     expect(screen.getByRole("link", { name: "MF0000000002" })).toHaveAttribute("href", "/shipments/22222222-2222-2222-2222-22222222222b");
     expect(screen.getByText("Served by: modern")).toBeVisible();
@@ -64,46 +67,61 @@ describe("shipments page", () => {
     const second = { items: [shipment({ id: "22222222-2222-2222-2222-22222222222b", tracking_number: "MF0000000002" })], next_cursor: null };
     const fetchMock = stubFetch(jsonResponse(first), jsonResponse(second));
     renderApp("/shipments");
-    expect(await screen.findByText(/2 shipments loaded in 2 requests/)).toBeVisible();
+    expect(await screen.findByText(/2 shipments, in step with the server/)).toBeVisible();
     expect(String(lastCall(fetchMock)[0])).toContain("cursor=abc");
   });
 
-  it("does not stop silently at a page cap: it says so and resumes from the cursor", async () => {
+  it("reads every page without asking, and has no load-more step", async () => {
     const page = (n: number, next: string | null) =>
       jsonResponse({
         items: [shipment({ id: `00000000-0000-0000-0000-00000000000${n}`, tracking_number: `MF000000000${n}` })],
         next_cursor: next,
       });
-    // Two pages to a batch: pages 1 and 2 pause, then "Load more" reads page 3, the last.
     const fetchMock = stubFetch(page(1, "c1"), page(2, "c2"), page(3, null));
-    const user = userEvent.setup();
+    renderApp("/shipments");
+
+    expect(await screen.findByText(/3 shipments, in step with the server/)).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(lastCall(fetchMock)[0])).toContain("cursor=c2");
+    expect(screen.getByRole("link", { name: "MF0000000003" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Load .* more/ })).not.toBeInTheDocument();
+  });
+
+  it("shows shipments the traffic engine creates and moves, as they change", async () => {
+    stubFetch(jsonResponse({ items: [], next_cursor: null }));
+    const store = new ShipmentStore();
+    const engine = new TrafficEngine({ createShipment: () => Promise.reject(new Error("unused")), postEvent: () => Promise.reject(new Error("unused")), track: () => Promise.reject(new Error("unused")) }, undefined, store);
     render(
       <MemoryRouter initialEntries={["/shipments"]}>
-        <StackProvider>
-          <ShipmentsPage pageLimit={2} />
-        </StackProvider>
+        <RuntimeProvider runtime={{ engine, store }}>
+          <StackProvider>
+            <ShipmentsPage />
+          </StackProvider>
+        </RuntimeProvider>
       </MemoryRouter>,
     );
+    expect(await screen.findByText(/0 shipments, in step/)).toBeVisible();
 
-    expect(await screen.findByText(/Showing the oldest 2 shipments/)).toBeVisible();
-    expect(screen.getByText("2+")).toBeVisible();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    act(() => {
+      store.add(
+        shipment({ id: "55555555-5555-5555-5555-55555555555b", tracking_number: "MF0000000042", status: "CREATED" }) as never,
+        Date.now(),
+      );
+    });
+    expect(await screen.findByRole("link", { name: "MF0000000042" })).toBeVisible();
+    expect(screen.getByText("Created", { selector: ".badge" })).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /Load 200 more/ }));
-    expect(await screen.findByText(/3 shipments loaded in 3 requests/)).toBeVisible();
-    // It continued from the second page's cursor, not from the start.
-    expect(String(lastCall(fetchMock)[0])).toContain("cursor=c2");
-    // The newest shipment, which a cap would have dropped, is in the list.
-    expect(screen.getByRole("link", { name: "MF0000000003" })).toBeVisible();
-    // The tile no longer carries a "+": everything is loaded.
-    expect(screen.getByText("all loaded")).toBeVisible();
-    expect(screen.queryByText("2+")).not.toBeInTheDocument();
+    act(() => {
+      store.setStatus("55555555-5555-5555-5555-55555555555b", "IN_TRANSIT", Date.now());
+    });
+    expect(await screen.findByText("In transit", { selector: ".badge" })).toBeVisible();
+    expect(screen.queryByText("Created", { selector: ".badge" })).not.toBeInTheDocument();
   });
 
   it("says why it stopped when the API fails", async () => {
     stubFetch(jsonResponse({ error: { code: "INTERNAL", message: "boom", request_id: "r1" } }, { status: 500 }));
     renderApp("/shipments");
-    expect(await screen.findByText(/Stopped after 0 shipments: boom/)).toBeVisible();
+    expect(await screen.findByText(/0 shipments. The last sync failed: boom/)).toBeVisible();
   });
 });
 

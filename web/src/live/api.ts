@@ -13,9 +13,7 @@ export const realApi: TrafficApi = {
       destination,
       promised_delivery_at: new Date(Date.now() + 2 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z"),
     });
-    if (result.ok) {
-      return { ok: true, id: result.data.id, trackingNumber: result.data.tracking_number, stack: result.stack };
-    }
+    if (result.ok) return { ok: true, shipment: result.data, stack: result.stack };
     return { ok: false, message: result.message, status: result.status };
   },
 

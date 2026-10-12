@@ -1,127 +1,89 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { ShipmentStatus } from "../api";
 import { BarChart, DonutChart, type Segment } from "../components/Charts";
 import { StatCard } from "../components/StatCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { listShipments, type ApiResult, type Shipment, type ShipmentPage } from "../client";
 import { formatTimestamp, statusLabel } from "../format";
 import { Icon } from "../icons";
-import { isOverdue, relativeTime, STATUS_ORDER, summarize } from "../stats";
-import { useStack } from "../stack";
+import { useEngine, useServerSync, useShipments, useSync } from "../live/runtime";
+import type { Row } from "../live/store";
+import { relativeTime, STATUS_ORDER } from "../stats";
+import { useNow } from "../useNow";
 
-/**
- * Pages of up to 100 shipments are read in turn. The API lists oldest first and has no total, so
- * the newest shipments are on the last page: a cap that stops early drops exactly those. A batch
- * is this many pages, and when it ends with more to read the page says so and offers the next one.
- */
-export const MAX_PAGES = 50;
-const SHOWN_STEP = 25;
+/** The server's list is read again this often while Browse is open, to pick up other clients. */
+export const SYNC_EVERY_MS = 15_000;
+const FLASH_MS = 2500;
+const FIRST_ROWS = 100;
 
-interface Loaded {
-  items: Shipment[];
-  pages: number;
-  /** `done`: every page is read. `paused`: a batch ended and the API has more. */
-  state: "loading" | "done" | "paused";
-  error: string | null;
+function isOverdue(row: Row, now: number): boolean {
+  return row.status !== "DELIVERED" && Date.parse(row.promisedAt) < now;
 }
 
-const EMPTY: Loaded = { items: [], pages: 0, state: "loading", error: null };
-
-export function ShipmentsPage({ pageLimit = MAX_PAGES }: { pageLimit?: number }) {
-  const { setStack } = useStack();
-  const [loaded, setLoaded] = useState<Loaded>(EMPTY);
+export function ShipmentsPage() {
+  const rows = useShipments();
+  const sync = useSync();
+  const engine = useEngine();
+  const { refresh } = useServerSync(SYNC_EVERY_MS);
+  const now = useNow();
   const [status, setStatus] = useState<ShipmentStatus | "">("");
   const [carrier, setCarrier] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [text, setText] = useState("");
-  const [shown, setShown] = useState(SHOWN_STEP);
-  const [batch, setBatch] = useState(0);
-  const [now] = useState(() => Date.now());
-  // Where the next page starts, kept across batches so that "Load more" resumes.
-  const cursor = useRef<string | null>(null);
-  const pages = useRef(0);
+  const [showAll, setShowAll] = useState(false);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void (async () => {
-      for (let n = 0; n < pageLimit; n += 1) {
-        const result: ApiResult<ShipmentPage> | null = await listShipments(
-          { cursor: cursor.current, limit: 100 },
-          controller.signal,
-        ).catch(() => null);
-        if (controller.signal.aborted) return;
-        if (result === null || !result.ok) {
-          setLoaded((prev) => ({
-            ...prev,
-            state: "paused",
-            error: result !== null && !result.ok ? result.message : "Could not reach ShipTrack.",
-          }));
-          return;
-        }
-        if (result.stack !== null) setStack(result.stack);
-        const items: Shipment[] = result.data.items;
-        const next: string | null = result.data.next_cursor;
-        pages.current += 1;
-        cursor.current = next;
-        const read = pages.current;
-        setLoaded((prev) => ({
-          items: [...prev.items, ...items],
-          pages: read,
-          state: next === null ? "done" : "loading",
-          error: null,
-        }));
-        if (next === null) return;
-      }
-      setLoaded((prev) => ({ ...prev, state: "paused" }));
-    })();
-    return () => {
-      controller.abort();
-    };
-  }, [batch, pageLimit, setStack]);
+  const summary = useMemo(() => {
+    const byStatus = Object.fromEntries(STATUS_ORDER.map((s) => [s, 0])) as Record<ShipmentStatus, number>;
+    const carriers = new Map<string, number>();
+    let overdue = 0;
+    let breached = 0;
+    for (const row of rows) {
+      byStatus[row.status] += 1;
+      carriers.set(row.carrier, (carriers.get(row.carrier) ?? 0) + 1);
+      if (isOverdue(row, now)) overdue += 1;
+      if (row.slaBreached) breached += 1;
+    }
+    const byCarrier = [...carriers.entries()]
+      .map(([name, count]) => ({ carrier: name, count }))
+      .sort((a, b) => b.count - a.count || a.carrier.localeCompare(b.carrier));
+    return { byStatus, byCarrier, overdue, breached };
+    // `now` is left out on purpose: whether a shipment is overdue changes by the minute, not the second.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
 
-  function restart(): void {
-    cursor.current = null;
-    pages.current = 0;
-    setLoaded(EMPTY);
-    setBatch((n) => n + 1);
-  }
-
-  function loadMore(): void {
-    setLoaded((prev) => ({ ...prev, state: "loading", error: null }));
-    setBatch((n) => n + 1);
-  }
-
-  const complete = loaded.state === "done";
-
-  const summary = useMemo(() => summarize(loaded.items, now), [loaded.items, now]);
-  const carriers = useMemo(() => summary.byCarrier.map((c) => c.carrier), [summary]);
-
-  const rows = useMemo(() => {
+  const filtered = useMemo(() => {
     const needle = text.trim().toUpperCase();
-    return [...loaded.items]
-      .filter((s) => status === "" || s.status === status)
-      .filter((s) => carrier === "" || s.carrier_code === carrier)
-      .filter((s) => !overdueOnly || isOverdue(s, now))
-      .filter((s) => needle === "" || s.tracking_number.includes(needle))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  }, [loaded.items, status, carrier, overdueOnly, text, now]);
+    return rows
+      .filter((r) => status === "" || r.status === status)
+      .filter((r) => carrier === "" || r.carrier === carrier)
+      .filter((r) => !overdueOnly || isOverdue(r, now))
+      .filter((r) => needle === "" || r.trackingNumber.includes(needle));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, status, carrier, overdueOnly, text]);
 
+  const visible = showAll ? filtered : filtered.slice(0, FIRST_ROWS);
   const segments: Segment[] = STATUS_ORDER.map((s) => ({
     label: statusLabel(s),
     value: summary.byStatus[s],
     className: `seg-${s.toLowerCase().replaceAll("_", "-")}`,
   }));
+  const moving = summary.byStatus.PICKED_UP + summary.byStatus.IN_TRANSIT + summary.byStatus.OUT_FOR_DELIVERY;
+  const delivered = summary.byStatus.DELIVERED;
 
   return (
     <section aria-labelledby="ship-heading">
       <div className="page-head">
         <h1 id="ship-heading">
-          <Icon name="grid" size={24} /> Shipments
+          <Icon name="grid" size={24} /> Browse
+          {engine.running && (
+            <span className="live-tag">
+              <span className="live-dot live-on" aria-hidden="true" /> moving live
+            </span>
+          )}
         </h1>
         <div className="page-actions">
-          <button type="button" className="ghost" onClick={restart}>
-            <Icon name="refresh" size={16} /> Reload
+          <button type="button" className="ghost" onClick={refresh}>
+            <Icon name="refresh" size={16} /> Sync now
           </button>
           <Link to="/shipments/new" className="button">
             <Icon name="plus" size={16} /> New shipment
@@ -130,32 +92,25 @@ export function ShipmentsPage({ pageLimit = MAX_PAGES }: { pageLimit?: number })
       </div>
 
       <p className="muted" role="status">
-        {loaded.error !== null
-          ? `Stopped after ${loaded.items.length} shipments: ${loaded.error}`
-          : complete
-            ? `${loaded.items.length} shipments loaded in ${loaded.pages} request${loaded.pages === 1 ? "" : "s"} to GET /api/v1/shipments.`
-            : loaded.state === "paused"
-              ? `Showing the oldest ${loaded.items.length} shipments (${loaded.pages} requests). The API has more, and it lists oldest first, so the newest are further on.`
-              : `Loading… ${loaded.items.length} shipments so far (page ${loaded.pages + 1}).`}
+        {sync.error !== null
+          ? `${rows.length} shipments. The last sync failed: ${sync.error}`
+          : sync.syncing
+            ? `${rows.length} shipments. Reading the server's list (page ${sync.pagesRead + 1})…`
+            : sync.lastSyncedAt === null
+              ? `${rows.length} shipments.`
+              : `${rows.length} shipments, in step with the server as of ${relativeTime(new Date(sync.lastSyncedAt).toISOString(), now)}. Changes from the live page appear here as they happen.`}
       </p>
-      {loaded.state === "paused" && (
-        <p>
-          <button type="button" onClick={loadMore}>
-            <Icon name="arrow-right" size={16} /> {loaded.error !== null ? "Try again" : `Load ${pageLimit * 100} more`}
-          </button>
-        </p>
-      )}
 
       <div className="stats">
+        <StatCard icon="package" label="Shipments" value={rows.length} tone="blue" />
+        <StatCard icon="truck" label="On the way" value={moving} tone="violet" />
         <StatCard
-          icon="package"
-          label="Shipments"
-          value={complete ? summary.total : `${summary.total}+`}
-          hint={complete ? "all loaded" : "oldest first, more to load"}
-          tone="blue"
+          icon="check-circle"
+          label="Delivered"
+          value={delivered}
+          hint={rows.length === 0 ? undefined : `${Math.round((delivered / rows.length) * 100)}% of all`}
+          tone="green"
         />
-        <StatCard icon="truck" label="On the way" value={summary.byStatus.PICKED_UP + summary.byStatus.IN_TRANSIT + summary.byStatus.OUT_FOR_DELIVERY} tone="violet" />
-        <StatCard icon="check-circle" label="Delivered" value={summary.delivered} hint={`${Math.round(summary.deliveredShare * 100)}% of loaded`} tone="green" />
         <StatCard icon="clock" label="Overdue" value={summary.overdue} hint={`${summary.breached} flagged by the SLA scan`} tone="amber" />
         <StatCard icon="alert" label="Exceptions" value={summary.byStatus.EXCEPTION} tone="red" />
       </div>
@@ -163,7 +118,7 @@ export function ShipmentsPage({ pageLimit = MAX_PAGES }: { pageLimit?: number })
       <div className="charts">
         <div className="card">
           <h2>By status</h2>
-          <DonutChart segments={segments} centre={String(summary.total)} caption="shipments" />
+          <DonutChart segments={segments} centre={String(rows.length)} caption="shipments" />
         </div>
         <div className="card">
           <h2>By carrier</h2>
@@ -181,32 +136,32 @@ export function ShipmentsPage({ pageLimit = MAX_PAGES }: { pageLimit?: number })
       <div className="card">
         <div className="filters">
           <label className="visually-hidden" htmlFor="f-text">Tracking number contains</label>
-          <input id="f-text" type="text" placeholder="Filter by tracking number" value={text} onChange={(e) => { setText(e.target.value); setShown(SHOWN_STEP); }} />
+          <input id="f-text" type="text" placeholder="Filter by tracking number" value={text} onChange={(e) => { setText(e.target.value); }} />
           <label className="visually-hidden" htmlFor="f-carrier">Carrier</label>
-          <select id="f-carrier" value={carrier} onChange={(e) => { setCarrier(e.target.value); setShown(SHOWN_STEP); }}>
+          <select id="f-carrier" value={carrier} onChange={(e) => { setCarrier(e.target.value); }}>
             <option value="">All carriers</option>
-            {carriers.map((c) => (
-              <option key={c} value={c}>{c}</option>
+            {summary.byCarrier.map((c) => (
+              <option key={c.carrier} value={c.carrier}>{c.carrier}</option>
             ))}
           </select>
           <label className="check">
-            <input type="checkbox" checked={overdueOnly} onChange={(e) => { setOverdueOnly(e.target.checked); setShown(SHOWN_STEP); }} />
+            <input type="checkbox" checked={overdueOnly} onChange={(e) => { setOverdueOnly(e.target.checked); }} />
             Overdue only
           </label>
         </div>
         <div className="chips" role="group" aria-label="Filter by status">
-          <button type="button" className={`chip ${status === "" ? "chip-on" : ""}`} aria-pressed={status === ""} onClick={() => { setStatus(""); setShown(SHOWN_STEP); }}>
+          <button type="button" className={`chip ${status === "" ? "chip-on" : ""}`} aria-pressed={status === ""} onClick={() => { setStatus(""); }}>
             All
           </button>
           {STATUS_ORDER.map((s) => (
-            <button key={s} type="button" className={`chip chip-${s.toLowerCase().replaceAll("_", "-")} ${status === s ? "chip-on" : ""}`} aria-pressed={status === s} onClick={() => { setStatus(s); setShown(SHOWN_STEP); }}>
+            <button key={s} type="button" className={`chip chip-${s.toLowerCase().replaceAll("_", "-")} ${status === s ? "chip-on" : ""}`} aria-pressed={status === s} onClick={() => { setStatus(s); }}>
               {statusLabel(s)} <span className="chip-count">{summary.byStatus[s]}</span>
             </button>
           ))}
         </div>
 
-        {rows.length === 0 ? (
-          <p className="muted">{complete ? "No shipments match." : "Waiting for pages…"}</p>
+        {filtered.length === 0 ? (
+          <p className="muted">{sync.syncing || sync.lastSyncedAt === null ? "Waiting for the first page…" : "No shipments match."}</p>
         ) : (
           <div className="table-wrap">
             <table>
@@ -221,33 +176,36 @@ export function ShipmentsPage({ pageLimit = MAX_PAGES }: { pageLimit?: number })
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, shown).map((s) => (
-                  <tr key={s.id}>
+                {visible.map((r) => (
+                  <tr key={r.id} className={now - r.touchedAt < FLASH_MS ? "row-flash" : undefined}>
                     <td>
-                      <Link to={`/shipments/${s.id}`} className="mono">{s.tracking_number}</Link>
+                      <Link to={`/shipments/${r.id}`} className="mono">{r.trackingNumber}</Link>
                     </td>
                     <td>
-                      <StatusBadge status={s.status} />
-                      {isOverdue(s, now) && (
-                        <span className={`flag ${s.sla_breached ? "flag-red" : "flag-amber"}`} title={s.sla_breached ? "SLA breach flagged" : "Past its promise"}>
-                          <Icon name="flag" size={13} /> {s.sla_breached ? "SLA breach" : "overdue"}
+                      <StatusBadge status={r.status} />
+                      {isOverdue(r, now) && (
+                        <span className={`flag ${r.slaBreached ? "flag-red" : "flag-amber"}`}>
+                          <Icon name="flag" size={13} /> {r.slaBreached ? "SLA breach" : "overdue"}
                         </span>
                       )}
                     </td>
-                    <td><span className="carrier">{s.carrier_code}</span></td>
-                    <td>{s.origin} <Icon name="arrow-right" size={12} /> {s.destination}</td>
-                    <td title={formatTimestamp(s.promised_delivery_at)}>{relativeTime(s.promised_delivery_at, now)}</td>
-                    <td title={formatTimestamp(s.created_at)}>{relativeTime(s.created_at, now)}</td>
+                    <td><span className="carrier">{r.carrier}</span></td>
+                    <td>{r.origin} <Icon name="arrow-right" size={12} /> {r.destination}</td>
+                    <td title={formatTimestamp(r.promisedAt)}>{relativeTime(r.promisedAt, now)}</td>
+                    <td title={formatTimestamp(r.createdAt)}>{relativeTime(r.createdAt, now)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-        {rows.length > shown && (
-          <button type="button" className="ghost" onClick={() => { setShown((n) => n + SHOWN_STEP); }}>
-            Show {Math.min(SHOWN_STEP, rows.length - shown)} more of {rows.length - shown}
-          </button>
+        {!showAll && filtered.length > FIRST_ROWS && (
+          <p className="muted">
+            Showing the newest {FIRST_ROWS} of {filtered.length}.{" "}
+            <button type="button" className="ghost" onClick={() => { setShowAll(true); }}>
+              Show all {filtered.length}
+            </button>
+          </p>
         )}
       </div>
     </section>

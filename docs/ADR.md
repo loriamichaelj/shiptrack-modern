@@ -30,6 +30,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0024 | `modern-ui-is-its-own` | Accepted |
 | 0025 | `synthetic-traffic-from-the-browser` | Accepted |
 | 0026 | `one-runtime-for-live-and-browse` | Accepted |
+| 0027 | `grafana-opens-on-the-alb-with-read-only-viewers` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -354,3 +355,18 @@ Conditions:
 - API call totals are counted separately from the list of recent calls, which keeps 200.
 
 **Consequences:** Browse reads the whole list, so its cost grows with the data: one request per 100 shipments, repeated every 15 s while it is open. The cap of 1,000 created per run bounds what the live traffic adds, and the API deletes no rows, so the list grows until `ops-reset-data` clears it. A second tab runs its own engine and store; the two agree through the server's list within 15 s, and not instantly.
+
+## ADR-0027: grafana-opens-on-the-alb-with-read-only-viewers
+
+**Status:** Accepted
+
+**Context:** Grafana was a ClusterIP service reached with `kubectl port-forward`, and the owner has no `kubectl` or AWS CLI, so the dashboards could not be opened while traffic ran. Only one board existed, and the app's event, SLA, notification, proof-of-delivery, and database metrics had no panels. Platform ADR-0035 opens a listener for Grafana on the ALB, reachable only from the preview addresses.
+
+**Decision:**
+- A `TargetGroupBinding`, rendered by the Grafana chart's `extraObjects`, registers the Grafana pods in the platform's `tg-grafana` (the contract's `tg_grafana_arn`), and allows only the ALB's security group to reach port 3000. The service stays ClusterIP and there is no Kubernetes ingress.
+- Anonymous visitors are Viewers and there is no login. `viewers_can_edit` is on so a viewer can open Explore, which is the query UI for the managed Prometheus; the provisioned boards are not editable and cannot be deleted or saved over. The admin password stays the chart's random one and is unused.
+- The datasource has a fixed uid (`amp`) and a 30 s `timeInterval`, and every panel names that uid and uses `$__rate_interval`, which is four scrapes. The managed collector accepts no interval under 30 s, so a burst of traffic shows within about 30 to 60 s.
+- Five boards are provisioned and the traffic board is the home page: live traffic, API RED, event pipeline, proof of delivery and database, service levels.
+- The service-level panels read the nearest histogram buckets, `le="0.25"` for the 300 ms track target (the stricter reading) and `le="60.0"` for 60 s of event freshness. The client library renders the bucket label as `60.0`.
+
+**Consequences:** Anyone who can send from a preview address can read the metrics and query them, over plain HTTP. They hold route templates, status classes, and counts, with no tracking numbers or secrets. Process panels (CPU, memory, descriptors) come from the client library's Linux collectors, and the board has nothing for node or pod resource use beyond that: Container Insights and the CloudWatch dashboard cover those. Grafana's data is not persisted, so a restart loses nothing that is not provisioned.

@@ -547,7 +547,7 @@ Providers: `helm` and `kubernetes`. Custom resources, once this root has any (th
 | `aws-load-balancer-controller` (chart pinned) | `clusterName`, `vpcId`, `enableServiceMutatorWebhook=false`, Pod Identity SA |
 | `keda` (chart pinned) | Operator SA has a Pod Identity association to `<PREFIX>-modern-keda`. `TriggerAuthentication` uses `podIdentity.provider: aws` (operator credentials from the default SDK chain). Do not use `aws-eks` (deprecated, IRSA-specific). Leave `identityOwner` at its default (`keda`) so the operator's own Pod Identity credentials are used |
 | `karpenter` (Phase M9) | + `EC2NodeClass` (AL2023, discovery tag subnets/SG, IMDSv2 hop 1, gp3) and NodePools via `kubectl_manifest` |
-| `grafana` (chart pinned) | ClusterIP only (access via `kubectl port-forward`); AMP datasource with SigV4 via Pod Identity; dashboards from `observability/grafana` via ConfigMap provisioning |
+| `grafana` (chart pinned) | ClusterIP service with no Kubernetes ingress; a TargetGroupBinding registers its pods in the platform's `tg-grafana`, so it opens on the ALB's Grafana port from the preview addresses, as anonymous read-only viewers (ADR-0027); `kubectl port-forward` for an operator with cluster access; AMP datasource with SigV4 via Pod Identity; dashboards from `observability/grafana` via ConfigMap provisioning |
 | Namespace `shiptrack` | Labels per §7.1 |
 | Role `shiptrack-deployer` + RoleBinding to group `shiptrack-deployers` | Namespace-scoped: core workload kinds, HPA, PDB, NetworkPolicy, ServiceAccount, Job/CronJob, `targetgroupbindings.elbv2.k8s.aws`, `scaledobjects/triggerauthentications.keda.sh`, Secrets (Helm release storage) |
 
@@ -661,13 +661,12 @@ Latency and freshness SLOs are tracked in Grafana panels with recording rules (a
 
 ### 11.2 Dashboards
 - **CloudWatch `shiptrack-modern-golden-signals`:** tg-modern RED; SQS depth/age (both queues + DLQs); pods and restarts; node CPU/mem (Container Insights); RDS connections; HPA/KEDA replica counts.
-- **Grafana** (`observability/grafana/`):
+- **Grafana** (`observability/grafana/`, five boards; `traffic` is the home board and refreshes every 10 s):
+  - Live traffic: requests, errors, latency, events accepted and applied, apply lag, pods reporting
   - App RED by route
-  - Event processing results and lag histogram
-  - SLA breaches
-  - Notifications
-  - DB pool
-  - SLO burn panels
+  - Event pipeline: results, lag percentiles and distribution, notifications
+  - Proof of delivery, SLA breaches, database pool, and each pod's process
+  - Service levels: the track-latency and event-freshness targets over the selected range (burn-rate panels are a stretch)
 
 **Log Insights saved queries:** errors by route; trace by `request_id`; slowest requests; `schema_incompatible` and `pod_not_migrated` events.
 

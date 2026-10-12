@@ -9,7 +9,7 @@ data "aws_ssm_parameter" "modern" {
 }
 
 data "aws_ssm_parameter" "platform" {
-  for_each = toset(["vpc_id"])
+  for_each = toset(["vpc_id", "sg_alb_id", "tg_grafana_arn"])
 
   name = "/shiptrack/platform/${each.key}"
 }

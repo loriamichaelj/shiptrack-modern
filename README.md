@@ -45,7 +45,7 @@ additions (design §1). The UI in `web/` is modern's own and is no longer held t
 | `terraform/modules/pod-role/` | One IAM role and Pod Identity association per service account |
 | `scripts/` | `render-values.sh` (SSM to Helm values), `smoke.sh`, `sample-rollout.sh` (what the cluster is doing during a Helm wait), `local-init.sh` |
 | `.trivyignore` | The three accepted findings in the EKS module, each with an expiry (ADR-0015). Recorded in [`docs/security/findings-register.md`](docs/security/findings-register.md) |
-| `observability/grafana/` | Dashboards that `terraform/addons` provisions |
+| `observability/grafana/` | Dashboards that `terraform/addons` provisions. Grafana opens at `http://<ALB address>:3000/` from the preview addresses (platform ADR-0035); Explore on its AMP datasource is the Prometheus query UI |
 
 ## Status
 
@@ -57,7 +57,7 @@ additions (design §1). The UI in `web/` is modern's own and is no longer held t
 | M3 Terraform cluster, M4 addons | Done and applied |
 | M5 Helm chart | Done; installed by `deploy-app.yml` |
 | M6 CI/CD | Done and in use: `apply-terraform`, `release-image`, and `deploy-app` have all run on GitHub |
-| M7 Observability | Partly done. The alarms (queue age, DLQs, pod restarts, SLA scan heartbeat, availability burn rate) are applied. The SLO document, the CloudWatch golden-signals dashboard, five of the six Grafana boards, and the Log Insights queries are not written |
+| M7 Observability | Partly done. The alarms (queue age, DLQs, pod restarts, SLA scan heartbeat, availability burn rate) are applied. Five Grafana boards are provisioned (live traffic, API RED, event pipeline, proof of delivery and database, service levels) and open on the ALB's port 3000 from the preview addresses (ADR-0027). The SLO document, the CloudWatch golden-signals dashboard, and the Log Insights queries are not written |
 | M8 and later | Not started: runbooks and game days, Karpenter and cost optimization. The contract migration (M10) is not taken (ADR-0023) |
 
 Modern serves all traffic. The cutover ran as waves 0 to 2 with the evidence in

@@ -23,6 +23,14 @@ override_data {
   values = { value = "vpc-mock" }
 }
 override_data {
+  target = data.aws_ssm_parameter.platform["sg_alb_id"]
+  values = { value = "sg-alb-mock" }
+}
+override_data {
+  target = data.aws_ssm_parameter.platform["tg_grafana_arn"]
+  values = { value = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/shiptrack-tg-grafana/0123456789abcdef" }
+}
+override_data {
   target = data.aws_eks_cluster.this
   values = {
     endpoint = "https://cluster.example.test"
@@ -143,6 +151,55 @@ run "grafana_reads_amp_with_sigv4_and_has_no_ingress" {
   assert {
     condition     = contains(keys(kubernetes_config_map_v1.dashboards.data), "app-red.json")
     error_message = "The dashboards in observability/grafana are provisioned."
+  }
+}
+
+run "grafana_is_bound_to_the_platform_target_group_and_allows_only_the_alb" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      length(yamldecode(helm_release.grafana.values[0]).extraObjects) == 1,
+      yamldecode(helm_release.grafana.values[0]).extraObjects[0].kind == "TargetGroupBinding",
+      yamldecode(helm_release.grafana.values[0]).extraObjects[0].spec.targetGroupARN == "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/shiptrack-tg-grafana/0123456789abcdef",
+      yamldecode(helm_release.grafana.values[0]).extraObjects[0].spec.targetType == "ip",
+      yamldecode(helm_release.grafana.values[0]).extraObjects[0].spec.serviceRef.name == "grafana",
+      yamldecode(helm_release.grafana.values[0]).extraObjects[0].spec.networking.ingress[0].from[0].securityGroup.groupID == "sg-alb-mock",
+      yamldecode(helm_release.grafana.values[0]).extraObjects[0].spec.networking.ingress[0].ports[0].port == 3000,
+    ])
+    error_message = "The Grafana service is bound to tg_grafana_arn, and only the ALB's security group may reach port 3000."
+  }
+}
+
+run "grafana_is_read_only_for_anonymous_visitors_and_opens_on_the_traffic_board" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      yamldecode(helm_release.grafana.values[0])["grafana.ini"]["auth.anonymous"].enabled == true,
+      yamldecode(helm_release.grafana.values[0])["grafana.ini"]["auth.anonymous"].org_role == "Viewer",
+      yamldecode(helm_release.grafana.values[0])["grafana.ini"].dashboards.default_home_dashboard_path == "/var/lib/grafana/dashboards/shiptrack/traffic.json",
+      contains(keys(kubernetes_config_map_v1.dashboards.data), "traffic.json"),
+    ])
+    error_message = "Anonymous visitors are Viewers, and Grafana opens on the provisioned traffic board."
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.grafana.values[0]).service.type == "ClusterIP" && !can(yamldecode(helm_release.grafana.values[0]).ingress.enabled)
+    error_message = "The service stays ClusterIP; the ALB reaches the pods through the binding, not a Kubernetes ingress."
+  }
+}
+
+run "every_dashboard_queries_the_amp_datasource_by_uid" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for name, body in kubernetes_config_map_v1.dashboards.data : alltrue([
+        for p in jsondecode(body).panels : try(p.datasource.uid, "") == yamldecode(helm_release.grafana.values[0]).datasources["datasources.yaml"].datasources[0].uid
+      ])
+    ])
+    error_message = "Each panel's datasource uid is the provisioned AMP datasource's, not an empty reference."
   }
 }
 

@@ -2,7 +2,7 @@
 //  - index.html has no inline <script> or <style> (a strict CSP would block them)
 //  - index.html contains the <div id="root"> mount point
 //  - total gzipped JS + CSS stays under the 200 KB budget
-// It prints the hashed asset file names, which cutover gate G6 compares across stacks.
+// It prints the hashed asset file names.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -20,6 +20,12 @@ if (/<style\b/i.test(html)) problems.push("index.html has an inline <style>");
 if (/\sstyle=/i.test(html)) problems.push("index.html has an inline style attribute");
 if (/https?:\/\//i.test(html.replace(/<!doctype[^>]*>/i, ""))) {
   problems.push("index.html references an external URL");
+}
+
+// A page with no icon makes the browser ask for /favicon.ico, which the SPA fallback answers with the
+// HTML shell. The icon must be a built file under /ui/assets/, which is served as an immutable asset.
+if (!/<link[^>]*rel="icon"[^>]*href="\/ui\/assets\/[^"]+\.svg"/.test(html)) {
+  problems.push("index.html does not link a built SVG icon under /ui/assets/");
 }
 
 const assets = readdirSync(join(dist, "assets")).sort();

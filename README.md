@@ -32,23 +32,55 @@ additions (design §1). The UI in `web/` is modern's own and is no longer held t
 ## The UI
 
 Modern's UI is its own (ADR-0024). It drives synthetic traffic through the public API from the
-browser, so the pages move as the answers arrive (ADR-0025, ADR-0026).
+browser, so the pages move as the answers arrive (ADR-0025, ADR-0026). Shipments are spread across
+the five seeded carriers (ADR-0028).
 
-**Live traffic.** Shipments move through their statuses as events are accepted and then applied.
+### Live traffic
 
-![The live traffic page: a board of shipments by status, with the traffic controls and the request, success, latency, and apply-lag tiles](docs/images/ui-live.png)
+Shipments move through their statuses as events are accepted and then applied. A pulsing chip has an
+event the API accepted that the shipment does not show yet.
 
-The same page below the fold: throughput, latency, where the shipments are, and the feed of each call.
+![The Live page: a board of shipments by status, each column with its count and tracking-number chips](docs/images/ui-live-board.png)
 
-![The live traffic page's throughput and latency charts, the shipments-by-status donut, and the live feed of accepted and applied events](docs/images/ui-live-charts.png)
+The controls start and stop the traffic, set the rate, and reset the counters. The tiles show requests
+per second, success, latency, shipments created, events applied, and the lag from a `202` to the event
+showing.
 
-**Browse.** Every shipment, in step with the server, with counts by status and carrier and filters.
+![The Live page's controls and six tiles: requests per second, success, latency p50 and p95, shipments created, events applied and sent, and apply lag](docs/images/ui-live-controls.png)
 
-![The Browse page: totals, a status donut, shipments by carrier, and a filterable table of shipments](docs/images/ui-browse.png)
+Throughput and latency per second, where the shipments are, and a feed of every call as it is made.
 
-**Track.** The original lookup, the five newest shipments as quick links (ADR-0029), and links to the other pages. The footer names the stack that served it.
+![The Live page's throughput and latency charts, the shipments-by-status donut, and the live feed of accepted and applied events](docs/images/ui-live-charts.png)
 
-![The Track page: a tracking number field, recent lookups, and cards linking to Live, Browse, New shipment, and System](docs/images/ui-track.png)
+### Track
+
+The lookup, with the five newest shipments as quick links (ADR-0029) and links to the other pages. The
+footer names the stack that served it.
+
+![The Track page: a tracking number field, the five newest shipments, and cards linking to Live, Browse, New shipment, and System](docs/images/ui-track.png)
+
+### Browse
+
+Every shipment, in step with the server, with totals, a status donut, and shipments by carrier.
+
+![The Browse page: totals, a status donut, and shipments by carrier](docs/images/ui-browse.png)
+
+The table filters by tracking number, carrier, status, and overdue, and links to each shipment.
+
+![The Browse page's filter bar and table of shipments with status, carrier, route, promised, and created](docs/images/ui-browse-table.png)
+
+### New shipment
+
+Creates one shipment with `POST /api/v1/shipments`. The tracking number comes back from the server.
+
+![The New shipment form: carrier code, origin, destination, and promised delivery](docs/images/ui-new-shipment.png)
+
+### System
+
+Readiness, the stack that answered, call totals for the session, and an API explorer. The activity
+panel on the right lists every call the page has made, from any page.
+
+![The System page: readiness, stack, latency, call totals, an API explorer, and the API activity panel listing recent calls](docs/images/ui-system.png)
 
 ## Layout
 

@@ -160,7 +160,7 @@ shiptrack-modern/
 
 ### 5.1 Tooling changes
 - Keep the forked `pyproject.toml` (tool config), declare dependencies in it, and replace `requirements*` with `uv.lock` (hash-locked).
-- Python stays 3.12.
+- Python is 3.14 (ADR-0031). Legacy stays on the 3.12 that Amazon Linux 2023 ships.
 - Replace gunicorn with `uvicorn` (single process; one worker per pod — scaling is horizontal).
 - Add `structlog`, `prometheus-client`, and `aws-secretsmanager-caching` (or an equivalent small cache).
 
@@ -345,11 +345,11 @@ FROM --platform=$BUILDPLATFORM node:24-slim@sha256:<digest> AS web
 # Node version must equal web/.nvmrc
 # npm ci && npm run build in web/ → /web/dist
 
-FROM python:3.12-slim@sha256:<digest> AS build
+FROM python:3.14-slim@sha256:<digest> AS build
 # uv from its official image, pinned by digest
 # install deps from uv.lock into /app/.venv (--frozen --no-dev), then the project
 
-FROM python:3.12-slim@sha256:<digest>
+FROM python:3.14-slim@sha256:<digest>
 # - non-root user uid/gid 10001, no home write requirements
 # - COPY --from=build /app/.venv /app/.venv ; COPY src ; COPY --from=web /web/dist /app/web/dist
 # - ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH=/app/.venv/bin:$PATH

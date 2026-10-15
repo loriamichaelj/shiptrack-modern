@@ -74,7 +74,7 @@ class _CountingReader:
         return self._digest.hexdigest()
 
 
-class PodStore:
+class ProofOfDeliveryStore:
     def __init__(self, bucket: str, region: str | None = None, client: Any = None) -> None:
         self.bucket = bucket
         # Signature V4 is required: the bucket is encrypted with KMS, and S3 refuses V2 signatures

@@ -209,15 +209,15 @@ describe("shipment page", () => {
   });
 
   it("uploads a document and offers it for opening", async () => {
-    const pod = { document_id: "44444444-4444-4444-4444-44444444444b", shipment_id: SID, content_type: "application/pdf", size_bytes: 2048, sha256: "a".repeat(64), uploaded_at: "2026-10-11T12:00:00Z" };
-    stubFetch(jsonResponse(shipment()), jsonResponse(trackView()), jsonResponse(pod, { status: 201 }));
+    const proof = { document_id: "44444444-4444-4444-4444-44444444444b", shipment_id: SID, content_type: "application/pdf", size_bytes: 2048, sha256: "a".repeat(64), uploaded_at: "2026-10-11T12:00:00Z" };
+    stubFetch(jsonResponse(shipment()), jsonResponse(trackView()), jsonResponse(proof, { status: 201 }));
     const user = userEvent.setup();
     renderApp(`/shipments/${SID}`);
     await screen.findByRole("heading", { name: TRACKING_NUMBER });
     await user.upload(screen.getByLabelText("Document"), new File(["%PDF"], "proof.pdf", { type: "application/pdf" }));
     await user.click(screen.getByRole("button", { name: /Upload/ }));
     const link = await screen.findByRole("link", { name: "Open document" });
-    expect(link).toHaveAttribute("href", `/api/v1/shipments/${SID}/pod/${pod.document_id}`);
+    expect(link).toHaveAttribute("href", `/api/v1/shipments/${SID}/pod/${proof.document_id}`);
   });
 
   it("says so when the shipment is not found", async () => {

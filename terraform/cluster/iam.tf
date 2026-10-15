@@ -165,7 +165,7 @@ data "aws_iam_policy_document" "grafana" {
 locals {
   workload_roles = {
     api = {
-      description = "ShipTrack API pods: send events, store POD objects, read the app secret."
+      description = "ShipTrack API pods: send events, store proof-of-delivery objects, read the app secret."
       policy_json = data.aws_iam_policy_document.api.json
     }
     worker-events = {

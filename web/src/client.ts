@@ -22,7 +22,7 @@ export interface ShipmentPage {
   next_cursor: string | null;
 }
 
-export interface PodDocument {
+export interface ProofOfDeliveryDocument {
   document_id: string;
   shipment_id: string;
   content_type: string;
@@ -40,8 +40,8 @@ export const EVENT_TYPES: EventType[] = [
   "EXCEPTION",
 ];
 
-export const POD_TYPES = ["application/pdf", "image/png", "image/jpeg"];
-export const POD_MAX_BYTES = 10 * 1024 * 1024;
+export const PROOF_OF_DELIVERY_TYPES = ["application/pdf", "image/png", "image/jpeg"];
+export const PROOF_OF_DELIVERY_MAX_BYTES = 10 * 1024 * 1024;
 
 export type ApiResult<T> =
   | { ok: true; data: T; stack: string | null; requestId: string | null }
@@ -96,7 +96,7 @@ async function run<T>(
 const isShipment = (v: unknown): v is Shipment =>
   isRecord(v) && typeof v.id === "string" && typeof v.tracking_number === "string";
 const isPage = (v: unknown): v is ShipmentPage => isRecord(v) && Array.isArray(v.items);
-const isPod = (v: unknown): v is PodDocument => isRecord(v) && typeof v.document_id === "string";
+const isProofOfDelivery = (v: unknown): v is ProofOfDeliveryDocument => isRecord(v) && typeof v.document_id === "string";
 const isAccepted = (v: unknown): v is { accepted: boolean; idempotency_key: string } =>
   isRecord(v) && typeof v.accepted === "boolean";
 const isReady = (v: unknown): v is { ready: boolean; reason: string | null } =>
@@ -161,17 +161,17 @@ export function postEvent(shipmentId: string, body: NewEvent, idempotencyKey: st
   );
 }
 
-export function uploadPod(shipmentId: string, file: File) {
+export function uploadProofOfDelivery(shipmentId: string, file: File) {
   const form = new FormData();
   form.append("file", file);
   return run(
     `/api/v1/shipments/${encodeURIComponent(shipmentId)}/pod`,
     { method: "POST", headers: json, body: form, skipBody: true, note: file.name },
-    isPod,
+    isProofOfDelivery,
   );
 }
 
-export function podUrl(shipmentId: string, documentId: string): string {
+export function proofOfDeliveryUrl(shipmentId: string, documentId: string): string {
   return `/api/v1/shipments/${encodeURIComponent(shipmentId)}/pod/${encodeURIComponent(documentId)}`;
 }
 

@@ -103,7 +103,7 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "POD uploads (last hour)",
+      "title": "Proof-of-delivery uploads (last hour)",
       "datasource": {
         "type": "prometheus",
         "uid": "amp"
@@ -158,7 +158,7 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "POD uploads failed or rejected (last hour)",
+      "title": "Proof-of-delivery uploads failed or rejected (last hour)",
       "datasource": {
         "type": "prometheus",
         "uid": "amp"
@@ -217,7 +217,7 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "POD still on a legacy disk (last hour)",
+      "title": "Proof of delivery still on a legacy disk (last hour)",
       "datasource": {
         "type": "prometheus",
         "uid": "amp"
@@ -336,7 +336,7 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "POD uploads by result",
+      "title": "Proof-of-delivery uploads by result",
       "datasource": {
         "type": "prometheus",
         "uid": "amp"

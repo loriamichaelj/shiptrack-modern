@@ -7,14 +7,14 @@ import { Timeline } from "../components/Timeline";
 import {
   EVENT_TYPES,
   getShipment,
-  podUrl,
+  proofOfDeliveryUrl,
   postEvent,
-  POD_MAX_BYTES,
-  POD_TYPES,
-  uploadPod,
+  PROOF_OF_DELIVERY_MAX_BYTES,
+  PROOF_OF_DELIVERY_TYPES,
+  uploadProofOfDelivery,
   type ApiResult,
   type EventType,
-  type PodDocument,
+  type ProofOfDeliveryDocument,
   type Shipment,
 } from "../client";
 import { formatTimestamp, statusLabel } from "../format";
@@ -26,18 +26,18 @@ import { localInput, toUtcIso } from "./NewShipmentPage";
 
 const REFRESH_DELAYS_MS = [1500, 4000, 8000];
 
-function readPods(shipmentId: string): PodDocument[] {
+function readProofsOfDelivery(shipmentId: string): ProofOfDeliveryDocument[] {
   try {
     const raw = localStorage.getItem(`shiptrack.pods.${shipmentId}`);
     const parsed: unknown = raw === null ? [] : JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as PodDocument[]) : [];
+    return Array.isArray(parsed) ? (parsed as ProofOfDeliveryDocument[]) : [];
   } catch {
     return [];
   }
 }
 
-function rememberPod(shipmentId: string, pod: PodDocument): PodDocument[] {
-  const all = [pod, ...readPods(shipmentId)].slice(0, 10);
+function rememberProofOfDelivery(shipmentId: string, proof: ProofOfDeliveryDocument): ProofOfDeliveryDocument[] {
+  const all = [proof, ...readProofsOfDelivery(shipmentId)].slice(0, 10);
   try {
     localStorage.setItem(`shiptrack.pods.${shipmentId}`, JSON.stringify(all));
   } catch {
@@ -131,7 +131,7 @@ export function ShipmentDetailPage() {
 
       <div className="grid-2">
         <EventForm shipment={s} onSent={refreshSoon} />
-        <PodPanel shipmentId={s.id} />
+        <ProofOfDeliveryPanel shipmentId={s.id} />
       </div>
     </section>
   );
@@ -192,8 +192,8 @@ function EventForm({ shipment, onSent }: { shipment: Shipment; onSent: () => voi
   );
 }
 
-function PodPanel({ shipmentId }: { shipmentId: string }) {
-  const [pods, setPods] = useState<PodDocument[]>(() => readPods(shipmentId));
+function ProofOfDeliveryPanel({ shipmentId }: { shipmentId: string }) {
+  const [proofs, setProofs] = useState<ProofOfDeliveryDocument[]>(() => readProofsOfDelivery(shipmentId));
   const [file, setFile] = useState<File | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -201,14 +201,14 @@ function PodPanel({ shipmentId }: { shipmentId: string }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (file === null) return setProblem("Choose a PDF, PNG, or JPEG file.");
-    if (!POD_TYPES.includes(file.type)) return setProblem("Only PDF, PNG, and JPEG files are accepted.");
-    if (file.size > POD_MAX_BYTES) return setProblem("Files are limited to 10 MiB.");
+    if (!PROOF_OF_DELIVERY_TYPES.includes(file.type)) return setProblem("Only PDF, PNG, and JPEG files are accepted.");
+    if (file.size > PROOF_OF_DELIVERY_MAX_BYTES) return setProblem("Files are limited to 10 MiB.");
     setProblem(null);
     setBusy(true);
-    const outcome = await uploadPod(shipmentId, file);
+    const outcome = await uploadProofOfDelivery(shipmentId, file);
     setBusy(false);
     if (outcome.ok) {
-      setPods(rememberPod(shipmentId, outcome.data));
+      setProofs(rememberProofOfDelivery(shipmentId, outcome.data));
       setFile(null);
     } else {
       setProblem(outcome.message);
@@ -219,26 +219,26 @@ function PodPanel({ shipmentId }: { shipmentId: string }) {
     <div className="card">
       <h2><Icon name="file" size={18} /> Proof of delivery</h2>
       <form className="form" onSubmit={(event) => void submit(event)} noValidate>
-        <label htmlFor="pod-file">Document</label>
-        <input id="pod-file" type="file" accept={POD_TYPES.join(",")} onChange={(e) => { setFile(e.target.files?.[0] ?? null); }} />
+        <label htmlFor="proof-file">Document</label>
+        <input id="proof-file" type="file" accept={PROOF_OF_DELIVERY_TYPES.join(",")} onChange={(e) => { setFile(e.target.files?.[0] ?? null); }} />
         <p className="muted">PDF, PNG, or JPEG, up to 10 MiB. Stored in S3 by modern.</p>
         {problem !== null && <p className="error" role="alert">{problem}</p>}
         <button type="submit" disabled={busy}><Icon name="upload" size={16} /> {busy ? "Uploading…" : "Upload"}</button>
       </form>
-      {pods.length > 0 && (
-        <div className="pods">
+      {proofs.length > 0 && (
+        <div className="proofs">
           <div className="call-title">Uploaded from this browser</div>
-          {pods.map((pod) => (
-            <div key={pod.document_id} className="pod">
-              {pod.content_type.startsWith("image/") ? (
-                <img src={podUrl(shipmentId, pod.document_id)} alt="Proof of delivery" width="72" height="72" />
+          {proofs.map((proof) => (
+            <div key={proof.document_id} className="proof">
+              {proof.content_type.startsWith("image/") ? (
+                <img src={proofOfDeliveryUrl(shipmentId, proof.document_id)} alt="Proof of delivery" width="72" height="72" />
               ) : (
-                <span className="pod-icon"><Icon name="file" size={28} /></span>
+                <span className="proof-icon"><Icon name="file" size={28} /></span>
               )}
               <div>
-                <a href={podUrl(shipmentId, pod.document_id)} target="_blank" rel="noreferrer">Open document</a>
-                <div className="muted small">{pod.content_type} · {(pod.size_bytes / 1024).toFixed(1)} KiB</div>
-                <div className="muted small mono">sha256 {pod.sha256.slice(0, 16)}…</div>
+                <a href={proofOfDeliveryUrl(shipmentId, proof.document_id)} target="_blank" rel="noreferrer">Open document</a>
+                <div className="muted small">{proof.content_type} · {(proof.size_bytes / 1024).toFixed(1)} KiB</div>
+                <div className="muted small mono">sha256 {proof.sha256.slice(0, 16)}…</div>
               </div>
             </div>
           ))}

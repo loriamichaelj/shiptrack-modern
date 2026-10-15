@@ -172,7 +172,7 @@ def test_storage_uri_is_an_s3_uri(
     assert uri == f"s3://{settings.pod_bucket}/pod/{sid}/{document_id}"
 
 
-def test_a_pod_still_on_a_legacy_disk_is_404_and_logged(
+def test_a_proof_of_delivery_still_on_a_legacy_disk_is_404_and_logged(
     client: TestClient,
     make_shipment: MakeShipment,
     engine: Engine,
@@ -186,7 +186,7 @@ def test_a_pod_still_on_a_legacy_disk_is_404_and_logged(
             text("UPDATE shiptrack.pod_documents SET storage_uri = :uri"),
             {"uri": f"file:///var/lib/shiptrack/pod/{sid}/{document_id}"},
         )
-    with caplog.at_level("WARNING", logger="shiptrack.pod"):
+    with caplog.at_level("WARNING", logger="shiptrack.proof_of_delivery"):
         response = client.get(f"/api/v1/shipments/{sid}/pod/{document_id}", follow_redirects=False)
     assert response.status_code == 404
     assert any("pod_not_migrated" in record.message for record in caplog.records)

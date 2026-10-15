@@ -13,10 +13,10 @@ DB_MAX_CONNECTIONS = 400
 BUDGET = int(DB_MAX_CONNECTIONS * 0.6)
 
 # Legacy keeps running during coexistence (ADR-0002): 2 hosts x 4 workers x SQLAlchemy's default
-# pool of 15, the SLA cron on both hosts, and PodSync plus the evidence scripts.
+# pool of 15, the SLA cron on both hosts, and proof-of-delivery sync plus the evidence scripts.
 LEGACY_APP = 2 * 4 * 15
 LEGACY_SLA_CRON = 2 * 2
-LEGACY_PODSYNC_AND_EVIDENCE = 2 * 2 + 2
+LEGACY_PROOF_OF_DELIVERY_SYNC_AND_EVIDENCE = 2 * 2 + 2
 
 
 def values() -> dict:
@@ -43,7 +43,7 @@ def worst_case(v: dict) -> int:
     api = v["api"]["hpa"]["maxReplicas"] * connections(v["api"]["pool"])
     events = v["workerEvents"]["keda"]["maxReplicaCount"] * connections(v["workerEvents"]["pool"])
     one_shots = connections(v["slaScan"]["pool"]) + connections(v["migrations"]["pool"])
-    legacy = LEGACY_APP + LEGACY_SLA_CRON + LEGACY_PODSYNC_AND_EVIDENCE
+    legacy = LEGACY_APP + LEGACY_SLA_CRON + LEGACY_PROOF_OF_DELIVERY_SYNC_AND_EVIDENCE
     return legacy + api + events + one_shots
 
 

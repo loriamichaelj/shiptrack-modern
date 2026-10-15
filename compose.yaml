@@ -6,7 +6,7 @@
 #   docker compose down -v
 #
 # The emulator answers to localhost.localstack.cloud, which resolves to it inside this network and to
-# 127.0.0.1 on your machine, so a presigned POD URL the API hands out opens from the host too.
+# 127.0.0.1 on your machine, so a presigned proof of delivery URL the API hands out opens from the host too.
 # The credentials below are the emulator's throwaway values.
 x-app: &app
   build: .

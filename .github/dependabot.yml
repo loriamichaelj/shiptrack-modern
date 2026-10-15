@@ -13,8 +13,8 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      # The UI build must use the Node version in web/.nvmrc, the same one legacy builds with
-      # (cutover gate G6). web/ is frozen until Wave 2 completes, so Node moves with it, not before.
+      # The UI build must use the Node version in web/.nvmrc. The freeze that tied it to legacy's UI
+      # build (cutover gate G6) is over, ADR-0024; this entry stays until Node updates are wanted.
       - dependency-name: node
   - package-ecosystem: uv
     directory: /
@@ -31,8 +31,8 @@ updates:
       web:
         patterns: ["*"]
     ignore:
-      # web/ is frozen until Wave 2 completes so both stacks serve one UI build (gate G6). Remove
-      # this entry when the freeze ends.
+      # The freeze on web/ for gate G6 is over (ADR-0024). Remove this entry to let Dependabot
+      # propose npm updates for the UI.
       - dependency-name: "*"
   - package-ecosystem: terraform
     directory: /terraform/cluster

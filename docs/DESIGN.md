@@ -96,6 +96,11 @@
 shiptrack-modern/
 ├── src/shiptrack/              # Forked from legacy v1.0.0, then refactored
 ├── web/                        # React UI (modern's own since the cutover, ADR-0024)
+│   └── src/
+│       ├── pages/              # Live, Search (/ui/), Track, Shipments (Browse), NewShipment, ShipmentDetail, System
+│       ├── components/         # StatCard, StatusBadge, StatusStepper, Timeline, Charts, LineChart, ApiInspector, StackBadge
+│       ├── live/               # engine.ts (synthetic traffic), store.ts (shipments), runtime.tsx (shared runtime, server sync)
+│       └── client.ts  api.ts  apiLog.ts  stack.tsx   # API client, call log, serving stack
 ├── migrations/                 # Alembic (same lineage as legacy)
 ├── tests/{unit,integration}/
 ├── pyproject.toml  uv.lock
@@ -305,21 +310,21 @@ This is correct regardless of how many scanners run. The CronJob stays `suspend:
 - `/ui/assets/*` via `StaticFiles`, with `Cache-Control: public, max-age=31536000, immutable`
 - `/ui` and `/ui/{path:path}` → `index.html`, with `Cache-Control: no-cache` (SPA fallback)
 
-URLs, cache headers, and HTML are identical to legacy (contract). The UI is not served on port 9090. For metrics, the `route` label on UI requests is the template `/ui/{path}`, never the raw path.
+URLs and cache headers are identical to legacy (contract); the HTML and assets are modern's own build (ADR-0024). The UI is not served on port 9090. For metrics, the `route` label on UI requests is the template `/ui/{path}`, never the raw path.
 
 **The UI** is modern's own and uses only the endpoints above, with no backend change:
 
 | Route | Does | Calls |
 |---|---|---|
-| `/ui/live` | Starts and stops synthetic traffic from the browser (create, event, read) at 1 to 20 requests a second and shows it moving: the board of shipments by status first, then throughput, latency, events applied against sent and the lag between them, and a feed. Traffic keeps running when another page is open | `POST /api/v1/shipments`, `POST …/events`, `GET /api/v1/track/{n}` |
-| `/ui/` | Tracking-number search, recent searches, links | none |
-| `/ui/track/:trackingNumber` | Status, progress stepper, event timeline, auto-refresh every 30 s | `GET /api/v1/track/{n}` |
+| `/ui/live` | Starts and stops synthetic traffic from the browser (create, event, read) at 1 to 20 requests a second (at most 8 in flight; a run stops by itself after an hour or after 1,000 shipments created; each shipment takes one of the five seeded carriers at random, ADR-0028; some events are sent twice with one `Idempotency-Key`) and shows it moving: the board of shipments by status first, then throughput, latency, events applied against sent and the lag between them, and a feed. Traffic keeps running when another page is open | `POST /api/v1/shipments`, `POST …/events`, `GET /api/v1/track/{n}` |
+| `/ui/` | Tracking-number search (`MF` and ten digits), the five newest shipments as quick links, refreshed every 30 s (ADR-0029), and links to the other pages | `GET /api/v1/shipments` |
+| `/ui/track/:trackingNumber` | Status, progress stepper, event timeline, auto-refresh every 30 s until delivered, and the last known status kept when a refresh fails | `GET /api/v1/track/{n}` |
 | `/ui/shipments` | Browse: every shipment, with counts, status and carrier charts, filters, and overdue flags. It reads all pages of the list (oldest first, no total) and again every 15 s, and shows what the live page creates and moves as it happens | `GET /api/v1/shipments` |
 | `/ui/shipments/new` | Creates a shipment | `POST /api/v1/shipments` |
-| `/ui/shipments/:id` | Details, progress, history; sends an event with a generated `Idempotency-Key`; uploads proof of delivery (PDF, PNG, JPEG, up to 10 MiB) and opens it | `GET /api/v1/shipments/{id}`, `POST …/events`, `POST …/pod`, `GET …/pod/{doc}` |
+| `/ui/shipments/:id` | Details, progress, history; sends an event with a generated `Idempotency-Key`; uploads proof of delivery (PDF, PNG, JPEG, up to 10 MiB) and opens it; after an event is sent it reads the shipment again at 1.5, 4, and 8 s | `GET /api/v1/shipments/{id}`, `POST …/events`, `POST …/pod`, `GET …/pod/{doc}` |
 | `/ui/system` | Readiness, the serving stack, every API call made since the page loaded (the list keeps the latest 200), the shipments held in the browser and when they were last synced, and an explorer of four read-only calls | `GET /readyz`, `/healthz`, `/api/v1/shipments?limit=3`, `/api/v1/track/{unknown}` |
 
-An **API activity** panel lists the latest 200 calls the page made (method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the bodies); the totals are counted separately and are not capped. The stack badge asks for the UI's own base path on load and reads `X-ShipTrack-Stack`. The site icon is `web/src/favicon.svg`, built into `/ui/assets/` like any asset (a truck on the header's gradient). Charts are SVG with presentation attributes and icons are inline SVG, so the CSP below needs no allowance; a document is shown by its same-origin URL (`img-src 'self'`), never a `blob:` URL.
+One runtime sits above the router: the traffic engine and a store of shipments, so every page shows the same data and traffic continues when another page is open (ADR-0026). The header shows a LIVE pill with a Stop control while traffic runs. An **API activity** panel lists the latest 200 calls the page made (method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the bodies); the totals are counted separately and are not capped. The stack badge asks for the UI's own base path on load and reads `X-ShipTrack-Stack`. The site icon is `web/src/favicon.svg`, built into `/ui/assets/` like any asset (a truck on the header's gradient). Charts are SVG with presentation attributes and icons are inline SVG, so the CSP below needs no allowance; a document is shown by its same-origin URL (`img-src 'self'`), never a `blob:` URL.
 
 **Security headers** (middleware, every port-8000 response):
 - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`
@@ -327,7 +332,7 @@ An **API activity** panel lists the latest 200 calls the page made (method, URL,
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Strict-Transport-Security: max-age=31536000` only when the platform `base_url` is HTTPS
 
-**Tests:** assert the headers in a unit test, and add a build check that the generated `index.html` contains no inline `<script>` or `<style>` (either would be blocked by this CSP).
+**Tests:** assert the headers in a unit test, and add a build check that the generated `index.html` contains no inline `<script>` or `<style>` (either would be blocked by this CSP). Vitest and Testing Library cover each page's states, the traffic engine with a fake clock and a fake API, the store, the statistics, and the API client.
 
 **Not in scope (roadmap):** serving the UI from S3 + CloudFront. It decouples UI deploys from API deploys, adds edge caching, and removes the need for the sticky UI listener rule (platform R-08). It makes a good "next steps" slide.
 

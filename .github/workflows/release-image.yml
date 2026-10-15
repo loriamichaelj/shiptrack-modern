@@ -5,9 +5,8 @@ name: release-image
 # tag, and scans the pushed digest. The merged digest is what deploys; tags are only for people.
 # ECR tags are immutable, so a rerun for the same commit finds the tag and stops.
 #
-# Parity of the UI build with the legacy release is checked by the platform's ui_parity tests at
-# cutover (gate G6); here the check is that amd64 and arm64 agree, so a hash cannot differ by
-# architecture.
+# The UI is modern's own build and is not held to legacy's (ADR-0024); the check here is that amd64
+# and arm64 agree, so a hash cannot differ by architecture.
 
 on:
   push:

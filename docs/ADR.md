@@ -339,7 +339,7 @@ Conditions:
 **Decision:**
 - The live page generates the traffic itself, from the browser, through the same public endpoints as any client: create a shipment, send tracking events with an `Idempotency-Key` (some are sent twice), and read the track view. It watches the result of its own calls.
 - It uses the carrier `ZZTEST`, which the platform's tests already use for data that is not real. ADR-0028 spreads it across the seeded carriers.
-- It is bounded: 1 to 20 requests a second, 8 in flight, 120 shipments tracked, an automatic stop after 15 minutes, and a stop when the page is left.
+- It is bounded: 1 to 20 requests a second, 8 in flight, 120 shipments tracked, an automatic stop after 15 minutes, and a stop when the page is left. ADR-0026 replaced the last two: a run stops after an hour or 1,000 shipments created, and traffic continues across pages.
 - No endpoint, header, or field is added.
 
 **Consequences:** It writes real rows to the shared database, which stay until the platform's `ops-reset-data` (platform ADR-0034) clears the database, because nothing in the API deletes them, and they are isolated only by the carrier code. The numbers are what this browser sees, so latency includes its distance to the load balancer; the apply lag (a `202` to the shipment showing the event) is measured by polling, to a resolution of a few hundred milliseconds. It shows only its own traffic, not other clients'. Throughput is limited by one browser; the k6 baseline remains the way to load the system.

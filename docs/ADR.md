@@ -418,4 +418,6 @@ Conditions:
 
 **Decision:** Modern moves to Python 3.14: the base images, `.python-version`, `requires-python` (`>=3.14,<3.15`), and the ruff and mypy targets. The lock is regenerated for 3.14 with the same package versions. The whole suite passes on 3.14, including with deprecation warnings raised as errors, and ruff and mypy are clean.
 
+The 3.14 base image's pip vendors copies of msgpack, urllib3, and pkg_resources, and the image scan reported four fixable HIGH findings in them. The runtime stage has no use for an installer, so it removes pip; the app's own environment is untouched and the scan is clean.
+
 **Consequences:** The image runs a different interpreter minor than legacy, which the API contract does not depend on. A dependency that does not support 3.14 would block an update, and the tests would show it. Base image updates for Python now arrive as Dependabot pull requests that change the pin only when the project's versions are moved with them, as here.

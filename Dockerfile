@@ -31,8 +31,12 @@ LABEL org.opencontainers.image.title="shiptrack-modern" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}"
 
+# The runtime needs no installer. pip ships in the base image with vendored copies of msgpack, urllib3,
+# and pkg_resources that the image scan reports, and nothing here installs anything after the build.
 RUN groupadd --system --gid 10001 shiptrack \
- && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin shiptrack
+ && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin shiptrack \
+ && python -m pip uninstall --yes pip \
+ && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

@@ -14,7 +14,7 @@
 ## 0. Instructions for the implementing agent
 
 1. **Fork, don't rewrite.** The first commit imports `shiptrack-legacy` at tag `v1.0.0` **unmodified** (`src/`, `migrations/`, `alembic.ini`, `tests/`, `web/`, `pyproject.toml`, and `requirements*`). Record the source repo, tag, and commit SHA in `docs/FORK.md`. Every later refactor references the remediation it implements in its pull request title or squash commit message (for example `REM-06: replace in-process queue with SQS`).
-2. **API contract is frozen.** The behavior in legacy design §3.4 must remain identical. The platform contract suite must pass against both stacks. The only allowed additions are `/healthz`, `/readyz`, the metrics server on port 9090, response headers `X-ShipTrack-Stack: modern`, `X-Request-Id`, and the REM-16 security headers, 503 `QUEUE_UNAVAILABLE` on the events endpoint, and the game-days-only `INJECTED_FAULT` 500 (§5.9). The contract suite recognizes both (legacy §3.4); `INJECTED_FAULT` is a failure outside game days. POD GET may return 302 → presigned URL. **The UI in `web/` is not part of the contract.** It calls only the endpoints of legacy §3.4, so it may differ from legacy's UI (ADR-0024).
+2. **API contract is frozen.** The behavior in legacy design §3.4 must remain identical. The platform contract suite must pass against both stacks. The only allowed additions are `/healthz`, `/readyz`, the metrics server on port 9090, response headers `X-ShipTrack-Stack: modern`, `X-Request-Id`, and the REM-16 security headers, 503 `QUEUE_UNAVAILABLE` on the events endpoint, and the game-days-only `INJECTED_FAULT` 500 (§5.9). The contract suite recognizes both (legacy §3.4); `INJECTED_FAULT` is a failure outside game days. Proof of delivery GET may return 302 → presigned URL. **The UI in `web/` is not part of the contract.** It calls only the endpoints of legacy §3.4, so it may differ from legacy's UI (ADR-0024).
 3. **Schema changes are expand/contract only** and must follow the ownership handoff in §9.1. Helm migrations stay **disabled** until handoff.
 4. **Never apply from a workstation.** Do not run `terraform apply`, `helm install/upgrade`, or `kubectl apply` against a real cluster. These run only inside GitHub Actions workflows with environment approval. OrbStack's local Kubernetes is fine for chart testing.
 5. Pin all versions: Terraform modules, Helm charts, base-image digests, and GitHub Actions (by SHA).
@@ -43,7 +43,7 @@
 | REM-02 | AP-02 | Runtime uses `shiptrack_app` (DML only); migrations Job uses `shiptrack_migrator` | Helm, IAM |
 | REM-03 | AP-03 | One ServiceAccount + IAM role per workload, resource-scoped policies, platform boundary | §8.1, §7 |
 | REM-04 | AP-04 | Nodes: IMDSv2 required, hop limit 1 (pods cannot reach the node role) | Launch template / EC2NodeClass |
-| REM-05 | AP-05 | POD stored in S3; no stickiness; presigned GET | App, platform bucket |
+| REM-05 | AP-05 | Proof of delivery stored in S3; no stickiness; presigned GET | App, platform bucket |
 | REM-06 | AP-06 | API → SQS (202 only after `SendMessage` succeeds) → worker; DLQ; idempotent apply | App, §8.1 |
 | REM-07 | AP-07 | `/healthz` liveness, `/readyz` readiness, startup probe; LBC pod readiness gates | App, Helm |
 | REM-08 | AP-08 | Structured JSON logs to stdout with `request_id`; shipped by the CloudWatch Observability add-on (Fluent Bit) | App, add-on |
@@ -70,7 +70,7 @@
  │                                                                              │
  │  api (Deployment, HPA 2–10) ──SendMessage──► SQS carrier-events ──► DLQ      │
  │     │  │                                          │                          │
- │     │  └─ PutObject/presign ─► S3 POD (platform)  ▼                          │
+ │     │  └─ PutObject/presign ─► S3 proof of delivery (platform)  ▼            │
  │     │                                 worker-events (KEDA 1–10)              │
  │     │                                    │   │                               │
  │     ▼                                    │   └─PutEvents─► EventBridge bus   │
@@ -228,11 +228,11 @@ SELECT id, :pod_name FROM breached;
 
 This is correct regardless of how many scanners run. The CronJob stays `suspend: true` until Wave 3, when the legacy cron is removed first. Log `sla_scan_completed` with `breaches` and `duration_ms`. This record also serves as the heartbeat signal for alarms.
 
-### 5.6 POD storage (REM-05)
+### 5.6 Proof-of-delivery storage (REM-05)
 - **Upload:** stream to `s3://<bucket>/pod/{shipment_id}/{document_id}` with `upload_fileobj`, computing the sha256 while streaming. The bucket default applies SSE-KMS. Store `storage_uri = s3://…`. Response shape is unchanged.
 - **Download:**
   - `s3://` → **302** to a presigned GET URL (TTL 300 s).
-  - `file://` (an unmigrated legacy record) → 404 + `pod_not_migrated` log + metric. Cutover gate G-POD (§9.2) limits this to the sync window described in legacy §8 (about 1–2 minutes after a POD is uploaded to legacy).
+  - `file://` (an unmigrated legacy record) → 404 + `pod_not_migrated` log + metric. Cutover gate G-POD (§9.2) limits this to the sync window described in legacy §8 (about 1–2 minutes after a proof of delivery is uploaded to legacy).
 - Starlette spools uploads over 1 MiB to `/tmp`, so mount an `emptyDir` at `/tmp` (`sizeLimit: 64Mi`) because the root filesystem is read-only.
 
 ### 5.7 Health endpoints (REM-07)
@@ -291,7 +291,7 @@ This is correct regardless of how many scanners run. The CronJob stays `suspend:
 | api | 10 | 6 | 60 |
 | worker-events | 10 | 2 | 20 |
 | sla-scan + migrate | 1 each | 2 | 4 |
-| legacy PodSync (2 hosts) + evidence scripts | — | 2 each | 6 |
+| legacy proof-of-delivery sync (2 hosts) + evidence scripts | — | 2 each | 6 |
 | **Total** | | | **214** |
 
   This must stay ≤ 60% of `db_max_connections` (≈ 240 of ≈ 400 on `db.t4g.medium`). Raising HPA/KEDA maxima or pool sizes means re-running this arithmetic; if the result exceeds the budget, record RDS Proxy as the decision in `docs/ADR.md`.
@@ -586,7 +586,7 @@ If it is ever run, it is the point of no return for rolling back to legacy.
 |---|---|---|---|---|
 | **0 — Dark launch** | Platform applied; modern cluster + add-ons + release deployed | Weights 0; contract `full` suite with `TARGET=modern`; k6 `baseline` with `TARGET=modern` | Contract green; k6 thresholds met; all alarms/dashboards live; Inspector shows no fixable CRITICAL/HIGH | N/A (no traffic) |
 | **1 — Read path + UI** | Wave 0 exit | Platform PR: `cutover.track` modern 10 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7). Moves `/api/v1/track/*` and `/ui/*` together; the UI rule is sticky, so existing browser sessions stay on their stack | Platform gates G1–G4 per step; UI stack badge shows `modern` for new sessions | Platform PR or break-glass: `track.modern = 0` |
-| **2 — Write path** | Wave 1 at 100%; legacy **v1.1.0** deployed; `migrate_pod_to_s3.py` run on both hosts; PodSync cron installed; **G-POD:** `SELECT count(*) FROM shiptrack.pod_documents WHERE storage_uri LIKE 'file://%' AND uploaded_at < now() - interval '5 minutes'` = 0 (run through the allow-listed `pod-gate` evidence script, legacy §7.6); legacy change freeze on | `cutover.default` modern 10 → 25 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7) | G1–G5; DLQ = 0; simulator ledger `verify` shows 0 lost events for modern-routed traffic; no `pod_not_migrated` event for a POD older than 5 minutes | Weight back to legacy. **Keep workers running** until the events queue drains; S3 PODs are readable by legacy v1.1 |
+| **2 — Write path** | Wave 1 at 100%; legacy **v1.1.0** deployed; `migrate_pod_to_s3.py` run on both hosts; proof-of-delivery sync cron installed; **G-POD:** `SELECT count(*) FROM shiptrack.pod_documents WHERE storage_uri LIKE 'file://%' AND uploaded_at < now() - interval '5 minutes'` = 0 (run through the allow-listed `pod-gate` evidence script, legacy §7.6); legacy change freeze on | `cutover.default` modern 10 → 25 → 50 → 100, each step held until its gates are judged on enough traffic (platform §7) | G1–G5; DLQ = 0; simulator ledger `verify` shows 0 lost events for modern-routed traffic; no `pod_not_migrated` event for a proof of delivery older than 5 minutes | Weight back to legacy. **Keep workers running** until the events queue drains; S3 proofs of delivery are readable by legacy v1.1 |
 | **Handoff** | Wave 2 at 100% with G1–G5 passing | Flip schema ownership (§9.1) | Modern deploy with `migrations.enabled=true` is a no-op at head | Revert flags |
 | **3 — Scheduled jobs + decommission** | Handoff complete | 1) SSM: remove `/etc/cron.d/shiptrack-sla` and `shiptrack-podsync` from legacy hosts; 2) Helm: `slaScan.suspend=false`, enable heartbeat alarm; 3) verify exactly one alert per breach; 4) the contract migration (§9.1) is not taken; 5) legacy keeps running behind the preview port and nothing is destroyed (platform ADR-0032) | Final cost snapshot captured | Suspend the CronJob and re-enable legacy's cron (`ops-legacy-cron.yml restore-sla`); `ops-rollback-cutover.yml` sends traffic to legacy |
 
@@ -740,7 +740,7 @@ The final presentation requires **at least 3** of these, with numbers.
 | M-R6 | Fixed EKS/AMP/add-on costs dominate at small scale | Cost-per-1M normalization; optimization plan |
 | M-R7 | Cluster version drifting into extended support | Version pin + upgrade runbook; calendar reminder |
 | M-R8 | UI served by the API pods couples UI and API releases | Accepted for scope; roadmap: S3 + CloudFront (§5.11) |
-| M-R9 | A POD uploaded to legacy is unreadable through modern for 1–2 minutes (PodSync window) | PodSync every minute under `flock`; G-POD gate; 404 + `pod_not_migrated` log and metric; window ends when Wave 2 reaches 100% (legacy §8) |
+| M-R9 | A proof of delivery uploaded to legacy is unreadable through modern for 1–2 minutes (proof-of-delivery sync window) | Proof-of-delivery sync every minute under `flock`; G-POD gate; 404 + `pod_not_migrated` log and metric; window ends when Wave 2 reaches 100% (legacy §8) |
 
 ---
 

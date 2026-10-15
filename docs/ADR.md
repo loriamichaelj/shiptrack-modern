@@ -8,7 +8,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0002 | `db-connection-budget` | Accepted |
 | 0003 | `no-cpu-limits` | Accepted |
 | 0004 | `pod-identity-token-automount` | Accepted |
-| 0005 | `podsync-window-acceptance` | Planned |
+| 0005 | `proof-of-delivery-sync-window-acceptance` | Planned |
 | 0006 | `transactional-outbox` | Planned |
 | 0007 | `sqs-encryption` | Accepted |
 | 0008 | `security-groups-for-pods` | Planned |
@@ -33,6 +33,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0027 | `grafana-opens-on-the-alb-with-read-only-viewers` | Accepted |
 | 0028 | `synthetic-traffic-uses-the-seeded-carriers` | Accepted |
 | 0029 | `recent-shipments-come-from-the-server` | Accepted |
+| 0030 | `proof-of-delivery-is-not-a-pod` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -61,7 +62,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | api | 10 | 6 | 60 |
 | worker-events | 10 | 2 | 20 |
 | sla-scan and migrate | 1 each | 2 | 4 |
-| legacy PodSync (2 hosts) and evidence scripts | | 2 each | 6 |
+| legacy proof-of-delivery sync (2 hosts) and evidence scripts | | 2 each | 6 |
 | **Total** | | | **214** |
 
 The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an HPA or KEDA maximum or a pool size means redoing this sum. If the result is over the budget, adopt RDS Proxy (ADR-0009) instead of raising the limit.
@@ -92,11 +93,11 @@ The budget is about 240 of about 400 connections on `db.t4g.medium`. Raising an 
 
 **Consequences:** No pod carries the default Kubernetes API token it never uses. If a workload ever fails to get credentials, check the Pod Identity association first, and set `serviceAccount.automountToken` to `true` only as a last resort and record it here.
 
-## ADR-0005: podsync-window-acceptance
+## ADR-0005: proof-of-delivery-sync-window-acceptance
 
 **Status:** Planned
 
-**Records:** Accepting the 1–2 minute POD window during Wave 2 (M-R9; see legacy ADR podsync-interval-and-window).
+**Records:** Accepting the 1–2 minute proof-of-delivery window during Wave 2 (M-R9; see legacy ADR proof-of-delivery-sync-interval-and-window).
 
 **Context:** _to be written when decided_
 
@@ -397,3 +398,13 @@ Conditions:
 - A complete read of the server's list now removes what the server no longer lists, except rows touched since that read began, which may have been created after the server answered the page that would have shown them.
 
 **Consequences:** The Track page reads the whole list, one request per 100 shipments, like Browse does; the store is shared, so a page that has just synced costs nothing. After a reset the chips and Browse correct themselves within one read. A lookup made in this browser is no longer offered again.
+
+## ADR-0030: proof-of-delivery-is-not-a-pod
+
+**Status:** Accepted
+
+**Context:** This repository runs on Kubernetes, where a pod is the unit a workload runs in, and it also handles the document a carrier produces on delivery, which was abbreviated POD. Both appeared side by side in the code, the chart, the dashboards, and the documents, for example "any pod can serve any upload" next to "a POD uploaded to legacy".
+
+**Decision:** The document is a proof of delivery, written out in prose, comments, messages, dashboard titles, and documents, and "proof-of-delivery" when it qualifies a noun. Code and test names say `proof_of_delivery` (the API module, the store, the metric constants, the UI components, styles, and functions). `pod`, lower case and never abbreviated to POD, is only a Kubernetes pod: pod security, Pod Identity, pod restarts, `podSelector`, the `pod` label on a metric, and pod names in tests keep that meaning. Names that stored data, other repositories, deployed resources, or the frozen contract depend on are kept: the `/pod` API paths, the `pod_documents` table, the `pod/` key prefix and the `pod_bucket_name` and `pod_bucket_arn` platform contract keys, the `SHIPTRACK_POD_BUCKET` setting and the `pod_bucket` field it fills, the chart's `podBucket` value, the `shiptrack_pod_uploads_total` and `shiptrack_pod_not_migrated_total` metrics, the `pod_not_migrated` and `pod_unsupported_storage_uri` log events, the `PodObjects` policy statement id, the `shiptrack.pods.<shipment>` key in the browser's `localStorage`, and the gate id `G-POD`, which reads as the proof-of-delivery gate.
+
+**Consequences:** No behavior, schema, contract, metric, or log-event name changes. A reader who sees `pod` in this repository should read it as Kubernetes, except in the kept names above, where it stands for proof of delivery; the proof-of-delivery names in the UI and the API module no longer contain it. The one deployed change is the description of the API workload's IAM role, which updates in place, and the dashboard titles in `domain.json`. This is a naming refactor of the REM-05 code, not a new remediation.

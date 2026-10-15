@@ -971,11 +971,11 @@ pre {
   margin: 0.75rem 0;
 }
 
-.pods {
+.proofs {
   margin-top: 1rem;
 }
 
-.pod {
+.proof {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -983,13 +983,13 @@ pre {
   border-bottom: 1px solid var(--line);
 }
 
-.pod img {
+.proof img {
   object-fit: cover;
   border: 1px solid var(--line);
   border-radius: 0.5rem;
 }
 
-.pod-icon {
+.proof-icon {
   display: grid;
   place-items: center;
   width: 72px;

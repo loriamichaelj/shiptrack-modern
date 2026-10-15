@@ -29,8 +29,11 @@ NOTIFICATIONS_SENT = Counter(
     "shiptrack_notifications_sent_total", "Notifications sent", ["detail_type"]
 )
 SLA_BREACHES = Counter("shiptrack_sla_breaches_total", "Shipments flagged as SLA breaches")
-POD_UPLOADS = Counter("shiptrack_pod_uploads_total", "Proof-of-delivery uploads", ["result"])
-POD_NOT_MIGRATED = Counter(
-    "shiptrack_pod_not_migrated_total", "Downloads of a POD that is still on a legacy disk"
+PROOF_OF_DELIVERY_UPLOADS = Counter(
+    "shiptrack_pod_uploads_total", "Proof-of-delivery uploads", ["result"]
+)
+PROOF_OF_DELIVERY_NOT_MIGRATED = Counter(
+    "shiptrack_pod_not_migrated_total",
+    "Downloads of a proof of delivery that is still on a legacy disk",
 )
 DB_POOL_CHECKED_OUT = Gauge("shiptrack_db_pool_checked_out", "Database connections in use")

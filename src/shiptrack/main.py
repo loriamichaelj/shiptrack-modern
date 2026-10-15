@@ -9,7 +9,7 @@ import structlog
 from fastapi import FastAPI
 
 from shiptrack import __version__, metrics
-from shiptrack.api import events, health, pod, shipments, track
+from shiptrack.api import events, health, proof_of_delivery, shipments, track
 from shiptrack.api.errors import register_exception_handlers
 from shiptrack.api.ui import mount_ui
 from shiptrack.config import Settings, load_settings
@@ -19,7 +19,7 @@ from shiptrack.logconfig import configure_logging
 from shiptrack.middleware import FaultInjectionMiddleware, RequestContextMiddleware
 from shiptrack.readiness import ReadinessProbe
 from shiptrack.secrets import SecretCache
-from shiptrack.storage.s3 import PodStore
+from shiptrack.storage.s3 import ProofOfDeliveryStore
 
 log = structlog.get_logger("shiptrack.app")
 
@@ -38,7 +38,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings = resolved
         app.state.session_factory = session_factory
         app.state.publisher = EventPublisher(resolved.require_events_queue(), resolved.aws_region)
-        app.state.pod_store = PodStore(resolved.require_pod_bucket(), resolved.aws_region)
+        app.state.proof_of_delivery_store = ProofOfDeliveryStore(
+            resolved.require_pod_bucket(), resolved.aws_region
+        )
         app.state.readiness = ReadinessProbe(session_factory, resolved)
         metrics.DB_POOL_CHECKED_OUT.set_function(lambda: float(engine.pool.checkedout()))  # type: ignore[attr-defined]
         if resolved.fault_error_rate > 0:
@@ -63,7 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(shipments.router)
     app.include_router(events.router)
     app.include_router(track.router)
-    app.include_router(pod.router)
+    app.include_router(proof_of_delivery.router)
     mount_ui(app, resolved.web_dist)
     # Added last runs first: the request context wraps the fault injector, so an injected 500 still
     # carries the request id and the headers and is counted in the metrics.

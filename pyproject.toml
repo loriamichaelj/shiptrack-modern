@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "shiptrack"
 version = "2.0.0"
 description = "ShipTrack shipment tracking API (modern stack)"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     "alembic>=1.14",
     "boto3>=1.35",
@@ -39,7 +39,7 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -53,7 +53,7 @@ ignore = ["PLR0913", "PLR2004", "B008"]
 "migrations/**" = ["E501"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 check_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true

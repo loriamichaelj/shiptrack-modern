@@ -724,7 +724,7 @@ left menu is the query UI for the managed Prometheus.
 
 ## Local development
 
-Requires Python 3.12, [uv](https://docs.astral.sh/uv/), and Docker (OrbStack works).
+Requires Python 3.14, [uv](https://docs.astral.sh/uv/), and Docker (OrbStack works).
 
 ```sh
 uv sync --frozen

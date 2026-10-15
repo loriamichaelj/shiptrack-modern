@@ -34,6 +34,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0028 | `synthetic-traffic-uses-the-seeded-carriers` | Accepted |
 | 0029 | `recent-shipments-come-from-the-server` | Accepted |
 | 0030 | `proof-of-delivery-is-not-a-pod` | Accepted |
+| 0031 | `python-3-14` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -408,3 +409,15 @@ Conditions:
 **Decision:** The document is a proof of delivery, written out in prose, comments, messages, dashboard titles, and documents, and "proof-of-delivery" when it qualifies a noun. Code and test names say `proof_of_delivery` (the API module, the store, the metric constants, the UI components, styles, and functions). `pod`, lower case and never abbreviated to POD, is only a Kubernetes pod: pod security, Pod Identity, pod restarts, `podSelector`, the `pod` label on a metric, and pod names in tests keep that meaning. Names that stored data, other repositories, deployed resources, or the frozen contract depend on are kept: the `/pod` API paths, the `pod_documents` table, the `pod/` key prefix and the `pod_bucket_name` and `pod_bucket_arn` platform contract keys, the `SHIPTRACK_POD_BUCKET` setting and the `pod_bucket` field it fills, the chart's `podBucket` value, the `shiptrack_pod_uploads_total` and `shiptrack_pod_not_migrated_total` metrics, the `pod_not_migrated` and `pod_unsupported_storage_uri` log events, the `PodObjects` policy statement id, the `shiptrack.pods.<shipment>` key in the browser's `localStorage`, and the gate id `G-POD`, which reads as the proof-of-delivery gate.
 
 **Consequences:** No behavior, schema, contract, metric, or log-event name changes. A reader who sees `pod` in this repository should read it as Kubernetes, except in the kept names above, where it stands for proof of delivery; the proof-of-delivery names in the UI and the API module no longer contain it. The one deployed change is the description of the API workload's IAM role, which updates in place, and the dashboard titles in `domain.json`. This is a naming refactor of the REM-05 code, not a new remediation.
+
+## ADR-0031: python-3-14
+
+**Status:** Accepted
+
+**Context:** Dependabot proposed the 3.14 base image. The project was pinned to 3.12 in `.python-version`, `requires-python`, and the ruff and mypy targets, so the image build failed with "No interpreter found for Python 3.12". The 3.12 pin came from the fork of legacy, whose hosts run the 3.12 that Amazon Linux 2023 ships; modern runs in its own image and has no such constraint.
+
+**Decision:** Modern moves to Python 3.14: the base images, `.python-version`, `requires-python` (`>=3.14,<3.15`), and the ruff and mypy targets. The lock is regenerated for 3.14 with the same package versions. The whole suite passes on 3.14, including with deprecation warnings raised as errors, and ruff and mypy are clean.
+
+The 3.14 base image's pip vendors copies of msgpack, urllib3, and pkg_resources, and the image scan reported four fixable HIGH findings in them. The runtime stage has no use for an installer, so it removes pip; the app's own environment is untouched and the scan is clean.
+
+**Consequences:** The image runs a different interpreter minor than legacy, which the API contract does not depend on. A dependency that does not support 3.14 would block an update, and the tests would show it. Base image updates for Python now arrive as Dependabot pull requests that change the pin only when the project's versions are moved with them, as here.

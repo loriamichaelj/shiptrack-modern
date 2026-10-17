@@ -29,7 +29,13 @@ class Settings(BaseSettings):
     # Credentials: the ARN of the secret, never the secret itself.
     db_secret_arn: str | None = None
     db_migrator_secret_arn: str | None = None
+    db_admin_secret_arn: str | None = None
     db_sslmode: str = "require"
+
+    # db-init: the SQL it runs, and the most connections each role may hold.
+    db_init_sql: Path = Path("/app/db/init.sql")
+    db_app_connection_limit: int = Field(default=200, ge=1)
+    db_migrator_connection_limit: int = Field(default=150, ge=1)
 
     # Connection pool, set per workload in Helm (design 5.10).
     db_pool_size: int = Field(default=4, ge=1)
@@ -46,6 +52,7 @@ class Settings(BaseSettings):
     gcp_project: str | None = None
     db_secret_name: str | None = None
     db_migrator_secret_name: str | None = None
+    db_admin_secret_name: str | None = None
     events_topic: str | None = None
     events_subscription: str | None = None
     notify_topic: str | None = None
@@ -106,6 +113,12 @@ class Settings(BaseSettings):
         return self._pick(
             (self.db_migrator_secret_arn, "DB_MIGRATOR_SECRET_ARN"),
             (self.db_migrator_secret_name, "DB_MIGRATOR_SECRET_NAME"),
+        )
+
+    def require_admin_secret(self) -> str:
+        return self._pick(
+            (self.db_admin_secret_arn, "DB_ADMIN_SECRET_ARN"),
+            (self.db_admin_secret_name, "DB_ADMIN_SECRET_NAME"),
         )
 
     def require_events_destination(self) -> str:

@@ -46,6 +46,7 @@ WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY alembic.ini ./
 COPY migrations ./migrations
+COPY db ./db
 COPY --from=web /web/dist /app/web/dist
 
 USER 10001:10001

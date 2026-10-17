@@ -17,6 +17,7 @@ from shiptrack.cloud import (
     build_secret_cache,
 )
 from shiptrack.config import ConfigError, Settings, load_settings
+from shiptrack.db.init import run_db_init
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.events.worker import EventWorker, NotifyWorker, QueueWorker
 from shiptrack.logconfig import configure_logging
@@ -26,7 +27,7 @@ log = structlog.get_logger("shiptrack")
 
 API_PORT = 8000
 OPS_PORT = 9090
-COMMANDS = ("api", "worker-events", "worker-notify", "sla-scan", "migrate")
+COMMANDS = ("api", "worker-events", "worker-notify", "sla-scan", "migrate", "db-init")
 
 
 class DrainingServer(uvicorn.Server):
@@ -107,20 +108,29 @@ def migrate(settings: Settings) -> int:
     return 0
 
 
+def db_init(settings: Settings) -> int:
+    """Create the application's roles and schema as the database administrator."""
+    configure_logging(settings.log_level, settings.cloud)
+    run_db_init(settings, build_secret_cache(settings))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m shiptrack", description=__doc__)
     parser.add_argument("command", nargs="?", default="api", choices=COMMANDS)
     args = parser.parse_args(argv)
     try:
         settings = load_settings()
-        if args.command == "api":
-            return serve_api(settings)
-        if args.command == "worker-events":
-            return serve_worker_events(settings)
-        if args.command == "worker-notify":
-            return serve_worker_notify(settings)
-        if args.command == "migrate":
-            return migrate(settings)
+        handlers = {
+            "api": serve_api,
+            "worker-events": serve_worker_events,
+            "worker-notify": serve_worker_notify,
+            "migrate": migrate,
+            "db-init": db_init,
+        }
+        handler = handlers.get(args.command)
+        if handler is not None:
+            return handler(settings)
         from shiptrack.jobs.sla_scan import main as sla_scan
 
         return sla_scan()

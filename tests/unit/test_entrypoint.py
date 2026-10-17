@@ -1,12 +1,19 @@
-"""`python -m shiptrack <command>`: one image, five roles (design 5.12)."""
+"""`python -m shiptrack <command>`: one image, several roles (design 5.3)."""
 
 import pytest
 
 from shiptrack import __main__ as entrypoint
 
 
-def test_the_commands_are_the_designs_five() -> None:
-    assert entrypoint.COMMANDS == ("api", "worker-events", "worker-notify", "sla-scan", "migrate")
+def test_the_commands_are_the_designs() -> None:
+    assert entrypoint.COMMANDS == (
+        "api",
+        "worker-events",
+        "worker-notify",
+        "sla-scan",
+        "migrate",
+        "db-init",
+    )
 
 
 def test_the_ports_are_fixed() -> None:

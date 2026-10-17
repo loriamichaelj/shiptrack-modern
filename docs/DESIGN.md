@@ -198,6 +198,7 @@ Configuration comes from `pydantic-settings` environment variables. INI support 
 | `worker-notify` | SQS consumer loop + metrics/health :9090 |
 | `sla-scan` | One-shot; exits 0/1 |
 | `migrate` | `alembic upgrade head` with migrator credentials; refuses to run unless `SHIPTRACK_MIGRATIONS_ENABLED=true` |
+| `db-init` | One-shot; runs `db/init.sql` as the database administrator to create the application's two roles and the schema, and sets their passwords from the secret store (ADR-0035). Used where the database is reachable only from the cluster; AWS keeps `db/bootstrap.sql` in the platform repository |
 
 ### 5.4 Event ingestion (REM-06)
 **API path:** validate the body → confirm the shipment exists (DB read; preserves the 404 contract) → `SendMessage` to `carrier-events` → return 202.

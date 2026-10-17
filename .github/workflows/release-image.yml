@@ -5,6 +5,9 @@ name: release-image
 # tag, and scans the pushed digest. The merged digest is what deploys; tags are only for people.
 # ECR tags are immutable, so a rerun for the same commit finds the tag and stops.
 #
+# After the scan, the merged index is copied unchanged to GHCR for the Azure and GCP targets (ADR-0034).
+# That job cannot fail the release: deploy-app follows this workflow and AWS must not wait on GHCR.
+#
 # The UI is modern's own build and is not held to legacy's (ADR-0024); the check here is that amd64
 # and arm64 agree, so a hash cannot differ by architecture.
 
@@ -32,6 +35,9 @@ concurrency:
 
 env:
   TRIVY_VERSION: "v0.74.0"
+  CRANE_VERSION: "v0.22.1"
+  # SHA-256 of go-containerregistry_Linux_x86_64.tar.gz, from the release's checksums.txt.
+  CRANE_SHA256: "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0"
   REPOSITORY: shiptrack/app
 
 jobs:
@@ -200,3 +206,82 @@ jobs:
         run: |
           TRIVY_USERNAME=AWS TRIVY_PASSWORD=$(aws ecr get-login-password) \
             trivy image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 "${REPO}@${DIGEST}"
+
+  # Copies the merged multi-arch index from ECR to GHCR without changing it, so the digest that
+  # deploys on AWS is the digest the Azure and GCP clusters pull. A failure here shows as a failed
+  # job and leaves the release green, because deploy-app reads this workflow's conclusion.
+  publish-ghcr:
+    needs: merge
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      DIGEST: ${{ needs.merge.outputs.digest }}
+    steps:
+      - name: Install crane
+        run: |
+          url="https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/crane.tar.gz" "$url"
+          echo "${CRANE_SHA256}  $RUNNER_TEMP/crane.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/crane-bin"
+          tar -xzf "$RUNNER_TEMP/crane.tar.gz" -C "$RUNNER_TEMP/crane-bin" crane
+          echo "$RUNNER_TEMP/crane-bin" >>"$GITHUB_PATH"
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Log in to ECR and GHCR
+        id: registries
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          registry=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com
+          echo "::add-mask::$registry"
+          aws ecr get-login-password | crane auth login "$registry" --username AWS --password-stdin
+          crane auth login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
+          echo "source=$registry/$REPOSITORY" >>"$GITHUB_OUTPUT"
+          echo "target=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_OUTPUT"
+      - name: Copy the index and check the digest
+        env:
+          SOURCE: ${{ steps.registries.outputs.source }}
+          TARGET: ${{ steps.registries.outputs.target }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no merged digest to publish"; exit 1; }
+          tag="${TARGET}:sha-${GITHUB_SHA}"
+          existing=$(crane digest "$tag" 2>/dev/null || true)
+          if [[ -n "$existing" && "$existing" != "$DIGEST" ]]; then
+            echo "::error::${tag} already points at ${existing}, not ${DIGEST}; it is not overwritten"
+            exit 1
+          fi
+          crane copy "${SOURCE}@${DIGEST}" "$tag"
+          for ref in "$tag" "${TARGET}@${DIGEST}"; do
+            got=$(crane digest "$ref")
+            if [[ "$got" != "$DIGEST" ]]; then
+              echo "::error::${ref} has digest ${got}, but ECR has ${DIGEST}"
+              exit 1
+            fi
+          done
+          echo "The digest is the same in ECR and GHCR."
+          {
+            echo "### GHCR"
+            echo
+            echo "- image: \`${TARGET}\`"
+            echo "- tag: \`sha-${GITHUB_SHA}\`"
+            echo "- digest: \`${DIGEST}\` (the same as in ECR)"
+          } >>"$GITHUB_STEP_SUMMARY"
+      # A new GHCR package starts private. The clusters pull without credentials, so this fails until
+      # the package is made public once in the GitHub UI (Package settings, Change visibility).
+      - name: Check that the package can be pulled anonymously
+        env:
+          TARGET: ${{ steps.registries.outputs.target }}
+        run: |
+          if ! DOCKER_CONFIG="$(mktemp -d)" crane manifest "${TARGET}@${DIGEST}" >/dev/null; then
+            echo "::error::${TARGET} cannot be pulled without credentials; make the package public"
+            exit 1
+          fi
+          echo "The package is public."

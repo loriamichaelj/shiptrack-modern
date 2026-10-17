@@ -169,6 +169,7 @@ Configuration comes from `pydantic-settings` environment variables. INI support 
 
 | Variable | Used by | Notes |
 |---|---|---|
+| `SHIPTRACK_CLOUD` | all | `aws` (default) or `gcp`. Selects the implementation of each cloud port (ADR-0032). The settings below are the AWS block; the GCP block is in the GCP repository's design §5.2 |
 | `SHIPTRACK_DB_SECRET_ARN` | all except migrate | `shiptrack/dev/db/app` |
 | `SHIPTRACK_DB_MIGRATOR_SECRET_ARN` | migrate | |
 | `SHIPTRACK_EVENTS_QUEUE_URL` | api, worker-events | |

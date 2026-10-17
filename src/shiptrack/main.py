@@ -12,14 +12,12 @@ from shiptrack import __version__, metrics
 from shiptrack.api import events, health, proof_of_delivery, shipments, track
 from shiptrack.api.errors import register_exception_handlers
 from shiptrack.api.ui import mount_ui
+from shiptrack.cloud import build_event_publisher, build_object_store, build_secret_cache
 from shiptrack.config import Settings, load_settings
 from shiptrack.db.session import create_db_engine, create_session_factory
-from shiptrack.events.publisher import EventPublisher
 from shiptrack.logconfig import configure_logging
 from shiptrack.middleware import FaultInjectionMiddleware, RequestContextMiddleware
 from shiptrack.readiness import ReadinessProbe
-from shiptrack.secrets import SecretCache
-from shiptrack.storage.s3 import ProofOfDeliveryStore
 
 log = structlog.get_logger("shiptrack.app")
 
@@ -30,17 +28,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        configure_logging(resolved.log_level)
+        configure_logging(resolved.log_level, resolved.cloud)
         engine = create_db_engine(
-            resolved, resolved.require_db_secret(), SecretCache(resolved.aws_region)
+            resolved, resolved.require_db_secret(), build_secret_cache(resolved)
         )
         session_factory = create_session_factory(engine)
         app.state.settings = resolved
         app.state.session_factory = session_factory
-        app.state.publisher = EventPublisher(resolved.require_events_queue(), resolved.aws_region)
-        app.state.proof_of_delivery_store = ProofOfDeliveryStore(
-            resolved.require_pod_bucket(), resolved.aws_region
-        )
+        app.state.publisher = build_event_publisher(resolved)
+        app.state.proof_of_delivery_store = build_object_store(resolved)
         app.state.readiness = ReadinessProbe(session_factory, resolved)
         metrics.DB_POOL_CHECKED_OUT.set_function(lambda: float(engine.pool.checkedout()))  # type: ignore[attr-defined]
         if resolved.fault_error_rate > 0:

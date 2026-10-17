@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import URL, make_url
 
+from shiptrack.cloud import build_events_queue, build_notifier
 from shiptrack.config import Settings
 from shiptrack.events.worker import EventWorker
 from shiptrack.main import create_app
@@ -186,10 +187,9 @@ def client(settings: Settings) -> Iterator[TestClient]:
 def event_worker(client: TestClient) -> EventWorker:
     state = client.app.state  # type: ignore[attr-defined]
     return EventWorker(
-        state.settings.events_queue_url,
+        build_events_queue(state.settings),
         state.session_factory,
-        bus_name=state.settings.event_bus_name,
-        region="us-east-1",
+        notifier=build_notifier(state.settings),
         sleep=lambda _: None,
     )
 

@@ -13,7 +13,7 @@ from shiptrack.api.errors import ApiError
 from shiptrack.db.session import get_session
 from shiptrack.domain.models import EventAccepted, EventIn
 from shiptrack.events.messages import EventMessage
-from shiptrack.events.publisher import EventPublisher, QueueUnavailableError
+from shiptrack.ports import EventPublisher, QueueUnavailableError
 
 router = APIRouter(prefix="/api/v1")
 

@@ -108,3 +108,22 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # The GCP ports' emulators, for the tests only (profile `gcp`): the app does not run against them.
+  #
+  #   docker compose --profile gcp up -d pubsub gcs
+  #   PUBSUB_EMULATOR_HOST=127.0.0.1:8085 STORAGE_EMULATOR_HOST=http://127.0.0.1:4443 uv run pytest
+  pubsub:
+    profiles: ["gcp"]
+    image: thekevjames/gcloud-pubsub-emulator@sha256:39d3670ed7900ed68a799ed1e000ab9ec6b1d47e9cd3251be30199a5af8366d2
+    environment:
+      PUBSUB_PROJECT1: proj,seed
+    ports:
+      - "127.0.0.1:8085:8681"
+
+  gcs:
+    profiles: ["gcp"]
+    image: fsouza/fake-gcs-server@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef
+    command: ["-scheme", "http", "-port", "4443", "-public-host", "127.0.0.1:4443"]
+    ports:
+      - "127.0.0.1:4443:4443"

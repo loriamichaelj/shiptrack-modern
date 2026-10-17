@@ -20,11 +20,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from shiptrack import metrics
+from shiptrack.cloud import build_secret_cache
 from shiptrack.config import load_settings
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.domain.models import format_utc
 from shiptrack.logconfig import configure_logging
-from shiptrack.secrets import SecretCache
 
 log = structlog.get_logger("shiptrack.sla")
 
@@ -80,11 +80,11 @@ def run_scan(session_factory: sessionmaker[Session], detected_by: str) -> list[B
 
 def main() -> int:
     settings = load_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.cloud)
     engine = create_db_engine(
         settings,
         settings.require_db_secret(),
-        SecretCache(settings.aws_region),
+        build_secret_cache(settings),
         pool_size=1,
         max_overflow=1,
     )

@@ -11,6 +11,10 @@ dependencies = [
     "alembic>=1.14",
     "boto3>=1.35",
     "fastapi>=0.115",
+    "google-auth>=2.35",
+    "google-cloud-pubsub>=2.26",
+    "google-cloud-secret-manager>=2.21",
+    "google-cloud-storage>=2.18",
     "prometheus-client>=0.21",
     "psycopg[binary]>=3.2",
     "pydantic>=2.9",
@@ -50,6 +54,7 @@ ignore = ["PLR0913", "PLR2004", "B008"]
 "tests/**" = ["PLR0915"]
 "src/shiptrack/__main__.py" = ["PLC0415"]  # each command imports only what it runs
 "src/shiptrack/api/ui.py" = ["PLC0415"]
+"src/shiptrack/cloud.py" = ["PLC0415"]  # a process loads only its own cloud's SDK
 "migrations/**" = ["E501"]
 
 [tool.mypy]

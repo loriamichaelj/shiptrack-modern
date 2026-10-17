@@ -53,6 +53,21 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen
+      # Emulators for the GCP ports (ADR-0032): Pub/Sub and a fake Cloud Storage server, by digest.
+      # Secret Manager has no emulator, so its source is a fake in the tests.
+      - name: Start the GCP emulators
+        run: |
+          docker run -d --name pubsub-emulator -p 127.0.0.1:8085:8681 -e PUBSUB_PROJECT1=proj,seed \
+            thekevjames/gcloud-pubsub-emulator@sha256:39d3670ed7900ed68a799ed1e000ab9ec6b1d47e9cd3251be30199a5af8366d2
+          docker run -d --name gcs-emulator -p 127.0.0.1:4443:4443 \
+            fsouza/fake-gcs-server@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef \
+            -scheme http -port 4443 -public-host 127.0.0.1:4443
+          for _ in $(seq 60); do
+            docker logs pubsub-emulator 2>&1 | grep -q "readiness port" && exit 0
+            sleep 1
+          done
+          docker logs pubsub-emulator
+          exit 1
       - name: Lint
         run: |
           uv run --frozen ruff check .
@@ -60,8 +75,12 @@ jobs:
       - name: Type check
         run: uv run --frozen mypy
       # The tests start a moto server for SQS, S3, Secrets Manager, and EventBridge (ADR-0012), so
-      # they need no AWS credentials and no endpoint from the environment.
+      # they need no AWS credentials and no endpoint from the environment. The GCP tests take theirs from
+      # the two emulator variables below.
       - name: Test with a 75% coverage gate
+        env:
+          PUBSUB_EMULATOR_HOST: 127.0.0.1:8085
+          STORAGE_EMULATOR_HOST: http://127.0.0.1:4443
         run: uv run --frozen pytest --cov=shiptrack --cov-fail-under=75 --cov-report=term-missing:skip-covered
       # Audits what uv.lock pins, without the project itself (it is not on PyPI).
       - name: Dependency audit

@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
+from shiptrack.cloud import build_notify_queue
 from shiptrack.config import Settings
 from shiptrack.events import worker as worker_module
 from shiptrack.events.worker import NotifyWorker
@@ -154,7 +155,7 @@ def test_the_notifier_consumes_the_envelope_eventbridge_writes(
     post(client, shipment["id"], "d-1", "DELIVERED")
     drain(client)
     assert settings.notify_queue_url
-    notifier = NotifyWorker(settings.notify_queue_url, "us-east-1")
+    notifier = NotifyWorker(build_notify_queue(settings))
     assert notifier.poll_once(0) == 1
     remaining = sqs().get_queue_attributes(
         QueueUrl=settings.notify_queue_url, AttributeNames=["ApproximateNumberOfMessages"]

@@ -2,7 +2,8 @@
 
 Connection resolution, in order:
 1. a connection passed in by the caller (`config.attributes["connection"]`), used by tests;
-2. the migrator credentials from Secrets Manager (`SHIPTRACK_DB_MIGRATOR_SECRET_ARN`), used by the
+2. the migrator credentials from the cloud's secret store (`SHIPTRACK_DB_MIGRATOR_SECRET_ARN`, or
+   `SHIPTRACK_DB_MIGRATOR_SECRET_NAME` on GCP), used by the
    `migrate` command (REM-02: migrations run as `shiptrack_migrator`, the application as `shiptrack_app`).
 """
 
@@ -12,10 +13,10 @@ from alembic import context
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from shiptrack.cloud import build_secret_cache
 from shiptrack.config import load_settings
 from shiptrack.db.models import SCHEMA, Base
 from shiptrack.db.session import create_db_engine
-from shiptrack.secrets import SecretCache
 
 config = context.config
 target_metadata = Base.metadata
@@ -54,7 +55,7 @@ def run_migrations_online() -> None:
     engine = create_db_engine(
         settings,
         settings.require_migrator_secret(),
-        SecretCache(settings.aws_region),
+        build_secret_cache(settings),
         pool_size=1,
         max_overflow=1,
     )

@@ -1,13 +1,17 @@
 """Configuration from environment variables (REM-01).
 
 Nothing is read from a file and no credential is configured here: the database credentials are
-fetched from Secrets Manager at startup (see `shiptrack.secrets`).
+fetched from the cloud's secret store at startup (see `shiptrack.secrets`).
+
+`SHIPTRACK_CLOUD` picks the cloud (ADR-0032). Each cloud has its own block of settings, and a block
+is checked only when its cloud is selected, at the point a command needs it.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +23,8 @@ class ConfigError(Exception):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SHIPTRACK_", extra="ignore")
+
+    cloud: Literal["aws", "gcp"] = "aws"
 
     # Credentials: the ARN of the secret, never the secret itself.
     db_secret_arn: str | None = None
@@ -35,6 +41,17 @@ class Settings(BaseSettings):
     event_bus_name: str | None = None
     pod_bucket: str | None = None
     aws_region: str | None = Field(default=None, validation_alias="AWS_REGION")
+
+    # GCP resources. The secret names are short: the project comes from `gcp_project`.
+    gcp_project: str | None = None
+    db_secret_name: str | None = None
+    db_migrator_secret_name: str | None = None
+    events_topic: str | None = None
+    events_subscription: str | None = None
+    notify_topic: str | None = None
+    notify_subscription: str | None = None
+    proof_of_delivery_bucket: str | None = None
+    proof_of_delivery_signer: str | None = None
 
     # Alembic revisions this build tolerates (design 9.1). /readyz fails when the database is at
     # any other revision.
@@ -71,30 +88,57 @@ class Settings(BaseSettings):
     def hsts_enabled(self) -> bool:
         return self.base_url.lower().startswith("https://")
 
+    def _require(self, value: str | None, variable: str) -> str:
+        if not value:
+            raise ConfigError(f"SHIPTRACK_{variable} is required when SHIPTRACK_CLOUD={self.cloud}")
+        return value
+
+    def _pick(self, aws: tuple[str | None, str], gcp: tuple[str | None, str]) -> str:
+        value, variable = aws if self.cloud == "aws" else gcp
+        return self._require(value, variable)
+
     def require_db_secret(self) -> str:
-        if not self.db_secret_arn:
-            raise ConfigError("SHIPTRACK_DB_SECRET_ARN is required")
-        return self.db_secret_arn
-
-    def require_events_queue(self) -> str:
-        if not self.events_queue_url:
-            raise ConfigError("SHIPTRACK_EVENTS_QUEUE_URL is required")
-        return self.events_queue_url
-
-    def require_pod_bucket(self) -> str:
-        if not self.pod_bucket:
-            raise ConfigError("SHIPTRACK_POD_BUCKET is required")
-        return self.pod_bucket
-
-    def require_notify_queue(self) -> str:
-        if not self.notify_queue_url:
-            raise ConfigError("SHIPTRACK_NOTIFY_QUEUE_URL is required")
-        return self.notify_queue_url
+        return self._pick(
+            (self.db_secret_arn, "DB_SECRET_ARN"), (self.db_secret_name, "DB_SECRET_NAME")
+        )
 
     def require_migrator_secret(self) -> str:
-        if not self.db_migrator_secret_arn:
-            raise ConfigError("SHIPTRACK_DB_MIGRATOR_SECRET_ARN is required")
-        return self.db_migrator_secret_arn
+        return self._pick(
+            (self.db_migrator_secret_arn, "DB_MIGRATOR_SECRET_ARN"),
+            (self.db_migrator_secret_name, "DB_MIGRATOR_SECRET_NAME"),
+        )
+
+    def require_events_destination(self) -> str:
+        """Where the API sends events: the SQS queue URL, or the Pub/Sub topic."""
+        return self._pick(
+            (self.events_queue_url, "EVENTS_QUEUE_URL"), (self.events_topic, "EVENTS_TOPIC")
+        )
+
+    def require_events_source(self) -> str:
+        """What worker-events reads: the SQS queue URL, or the Pub/Sub subscription."""
+        return self._pick(
+            (self.events_queue_url, "EVENTS_QUEUE_URL"),
+            (self.events_subscription, "EVENTS_SUBSCRIPTION"),
+        )
+
+    def require_notify_source(self) -> str:
+        """What worker-notify reads: the SQS queue URL, or the Pub/Sub subscription."""
+        return self._pick(
+            (self.notify_queue_url, "NOTIFY_QUEUE_URL"),
+            (self.notify_subscription, "NOTIFY_SUBSCRIPTION"),
+        )
+
+    def require_pod_bucket(self) -> str:
+        return self._pick(
+            (self.pod_bucket, "POD_BUCKET"),
+            (self.proof_of_delivery_bucket, "PROOF_OF_DELIVERY_BUCKET"),
+        )
+
+    def require_gcp_project(self) -> str:
+        return self._require(self.gcp_project, "GCP_PROJECT")
+
+    def require_proof_of_delivery_signer(self) -> str:
+        return self._require(self.proof_of_delivery_signer, "PROOF_OF_DELIVERY_SIGNER")
 
 
 def load_settings() -> Settings:

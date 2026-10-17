@@ -1,4 +1,5 @@
-"""The SQS consumers against a fake client: what is deleted, what is left, and how they stop."""
+"""The queue consumers over SQS, against a fake client: what is deleted, what is left, and how they
+stop."""
 
 import json
 import threading
@@ -14,7 +15,9 @@ from shiptrack.domain.status import Status
 from shiptrack.events import worker as worker_module
 from shiptrack.events.messages import EventMessage
 from shiptrack.events.processor import ApplyResult
+from shiptrack.events.sqs import EventBridgeNotifier, SqsQueue
 from shiptrack.events.worker import EventWorker, NotifyWorker, QueueWorker
+from shiptrack.ports import ReceivedMessage
 
 
 class FakeSqs:
@@ -58,13 +61,15 @@ def body(key: str, event_type: Status = Status.IN_TRANSIT) -> str:
     ).to_json()
 
 
+def queue(sqs: FakeSqs) -> SqsQueue:
+    return SqsQueue("http://queue", client=sqs)
+
+
 def make(sqs: FakeSqs, events: Any = None, bus: str | None = "bus") -> EventWorker:
     return EventWorker(
-        "http://queue",
+        queue(sqs),
         fake_factory,  # type: ignore[arg-type]
-        bus_name=bus,
-        sqs=sqs,
-        events=events,
+        notifier=EventBridgeNotifier(bus, client=events) if bus else None,
         sleep=lambda _: None,
     )
 
@@ -174,10 +179,10 @@ def test_stop_ends_the_loop_after_the_poll_in_progress() -> None:
             self.stop()
             return 0
 
-        def handle(self, message: dict[str, Any]) -> bool:
+        def handle(self, body: str) -> bool:
             return True
 
-    worker = OneShot("http://queue", sqs=FakeSqs())
+    worker = OneShot(queue(FakeSqs()))
     thread = threading.Thread(target=worker.run)
     thread.start()
     thread.join(timeout=5)
@@ -208,12 +213,12 @@ def envelope(event_id: str, detail_type: str = "ShipmentDelivered") -> str:
 
 def test_the_notifier_sends_each_event_once() -> None:
     sqs = FakeSqs(envelope("e1"), envelope("e1"), envelope("e2"))
-    NotifyWorker("http://queue", sqs=sqs).poll_once(0)
+    NotifyWorker(queue(sqs)).poll_once(0)
     assert sqs.deleted == ["h0", "h1", "h2"]
 
 
 def test_the_notifier_forgets_the_oldest_ids() -> None:
-    worker = NotifyWorker("http://queue", sqs=FakeSqs())
+    worker = NotifyWorker(queue(FakeSqs()))
     for i in range(NotifyWorker.CACHE_SIZE + 1):
         assert not worker._is_repeat(f"e{i}")
     assert not worker._is_repeat("e0")
@@ -222,5 +227,66 @@ def test_the_notifier_forgets_the_oldest_ids() -> None:
 
 def test_an_unreadable_notification_is_left_alone() -> None:
     sqs = FakeSqs("{}", "oops")
-    NotifyWorker("http://queue", sqs=sqs).poll_once(0)
+    NotifyWorker(queue(sqs)).poll_once(0)
     assert sqs.deleted == []
+
+
+class FakeQueue:
+    """A queue that is not SQS: it records what the worker settles, and asks for an idle wait."""
+
+    transient_errors: tuple[type[Exception], ...] = (ConnectionError,)
+
+    def __init__(self, *bodies: str, idle_backoff_seconds: float = 0.0) -> None:
+        self.idle_backoff_seconds = idle_backoff_seconds
+        self.pending = [ReceivedMessage(body, f"h{i}") for i, body in enumerate(bodies)]
+        self.acknowledged: list[str] = []
+        self.released: list[str] = []
+
+    def receive(self, max_messages: int, wait_seconds: int) -> list[ReceivedMessage]:
+        batch, self.pending = self.pending[:max_messages], self.pending[max_messages:]
+        return batch
+
+    def acknowledge(self, message: ReceivedMessage) -> None:
+        self.acknowledged.append(message.handle)
+
+    def release(self, message: ReceivedMessage) -> None:
+        self.released.append(message.handle)
+
+
+def test_a_failed_message_is_released_and_a_handled_one_acknowledged() -> None:
+    queue = FakeQueue(envelope("e1"), "oops")
+    NotifyWorker(queue).poll_once(0)
+    assert (queue.acknowledged, queue.released) == (["h0"], ["h1"])
+
+
+def test_an_empty_poll_waits_when_the_queue_asks_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker = NotifyWorker(FakeQueue(idle_backoff_seconds=1.0))
+    waits: list[float] = []
+    monkeypatch.setattr(worker._stopping, "wait", waits.append)
+    assert worker.poll_once(0) == 0
+    assert waits == [1.0]
+
+
+def test_a_poll_with_messages_does_not_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker = NotifyWorker(FakeQueue(envelope("e1"), idle_backoff_seconds=1.0))
+    waits: list[float] = []
+    monkeypatch.setattr(worker._stopping, "wait", waits.append)
+    worker.poll_once(0)
+    assert waits == []
+
+
+def test_the_loop_survives_the_queue_s_transient_errors() -> None:
+    class Flaky(FakeQueue):
+        calls = 0
+
+        def receive(self, max_messages: int, wait_seconds: int) -> list[ReceivedMessage]:
+            self.calls += 1
+            if self.calls == 1:
+                raise ConnectionError("reset")
+            worker.stop()
+            return []
+
+    worker = NotifyWorker(Flaky())
+    worker._stopping.wait = lambda _: False  # type: ignore[method-assign]  # skip the back-off
+    worker.run()
+    assert worker._queue.calls == 2  # type: ignore[attr-defined]

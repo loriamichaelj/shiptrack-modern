@@ -1,4 +1,4 @@
-"""Send events to the queue before acknowledging them (REM-06).
+"""Send events to SQS before acknowledging them (REM-06).
 
 The API answers 202 only after SendMessage has succeeded. If it fails, the caller gets a 503 and
 knows to retry; an event that was not durably queued is never acknowledged.
@@ -14,15 +14,15 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from shiptrack import metrics
 from shiptrack.events.messages import EventMessage
+from shiptrack.ports import QueueUnavailableError
 
 log = structlog.get_logger("shiptrack.events")
 
 
-class QueueUnavailableError(Exception):
-    """The event could not be queued."""
+__all__ = ["QueueUnavailableError", "SqsEventPublisher"]
 
 
-class EventPublisher:
+class SqsEventPublisher:
     def __init__(self, queue_url: str, region: str | None = None, client: Any = None) -> None:
         self._queue_url = queue_url
         self._client = client or boto3.client("sqs", region_name=region)

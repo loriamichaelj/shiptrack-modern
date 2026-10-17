@@ -1,4 +1,4 @@
-"""SQS consumers (REM-06): worker-events applies events, worker-notify logs notifications."""
+"""Queue consumers (REM-06): worker-events applies events, worker-notify logs notifications."""
 
 from __future__ import annotations
 
@@ -9,9 +9,7 @@ from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 
-import boto3
 import structlog
-from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -20,29 +18,28 @@ from shiptrack.db.models import Shipment
 from shiptrack.domain.status import Status
 from shiptrack.events.messages import EventMessage
 from shiptrack.events.processor import ApplyResult, apply_event
+from shiptrack.ports import MessageQueue, NotificationFailedError, Notifier
 
 log = structlog.get_logger("shiptrack.worker")
 
 LONG_POLL_SECONDS = 20
 BATCH_SIZE = 10
-VISIBILITY_TIMEOUT_SECONDS = 60
 HEARTBEAT_LIMIT_SECONDS = 120
 
 # A change to one of these statuses is announced on the event bus.
 NOTIFIED = {Status.DELIVERED: "ShipmentDelivered", Status.EXCEPTION: "ShipmentException"}
-PUT_EVENTS_ATTEMPTS = 3
+NOTIFY_ATTEMPTS = 3
 
 
 class QueueWorker:
-    """Long-poll a queue, handle each message on its own, and delete only those that succeeded.
+    """Poll a queue, handle each message on its own, and acknowledge only those that succeeded.
 
-    A message that fails is left alone: it becomes visible again after the visibility timeout and
-    reaches the dead-letter queue after the redrive policy's maxReceiveCount.
+    A message that fails is released, so the queue delivers it again and, after its redelivery
+    limit, moves it to the dead-letter queue.
     """
 
-    def __init__(self, queue_url: str, region: str | None = None, sqs: Any = None) -> None:
-        self._queue_url = queue_url
-        self._sqs = sqs or boto3.client("sqs", region_name=region)
+    def __init__(self, queue: MessageQueue) -> None:
+        self._queue = queue
         self._stopping = threading.Event()
         self._last_beat = time.monotonic()
 
@@ -64,7 +61,7 @@ class QueueWorker:
         while not self.stopping:
             try:
                 self.poll_once(LONG_POLL_SECONDS)
-            except (ClientError, BotoCoreError) as exc:
+            except self._queue.transient_errors as exc:
                 log.error("queue_poll_failed", error=type(exc).__name__)
                 self._stopping.wait(5)  # back off, but wake at once on SIGTERM
         log.info("worker_stopped")
@@ -74,48 +71,38 @@ class QueueWorker:
     def poll_once(self, wait_seconds: int = LONG_POLL_SECONDS) -> int:
         """Receive up to a batch, handle each message, and return how many were received."""
         self._last_beat = time.monotonic()
-        response = self._sqs.receive_message(
-            QueueUrl=self._queue_url,
-            MaxNumberOfMessages=BATCH_SIZE,
-            WaitTimeSeconds=wait_seconds,
-            VisibilityTimeout=VISIBILITY_TIMEOUT_SECONDS,
-            MessageAttributeNames=["All"],
-        )
-        messages = response.get("Messages", [])
+        messages = self._queue.receive(BATCH_SIZE, wait_seconds)
         for message in messages:
-            if self.handle(message):
-                self._sqs.delete_message(
-                    QueueUrl=self._queue_url, ReceiptHandle=message["ReceiptHandle"]
-                )
+            if self.handle(message.body):
+                self._queue.acknowledge(message)
+            else:
+                self._queue.release(message)
+        if not messages and self._queue.idle_backoff_seconds:
+            self._stopping.wait(self._queue.idle_backoff_seconds)
         self._last_beat = time.monotonic()
         return len(messages)
 
-    def handle(self, message: dict[str, Any]) -> bool:
+    def handle(self, body: str) -> bool:
         raise NotImplementedError
 
 
 class EventWorker(QueueWorker):
     def __init__(
         self,
-        queue_url: str,
+        queue: MessageQueue,
         session_factory: sessionmaker[Session],
         *,
-        bus_name: str | None = None,
-        region: str | None = None,
-        sqs: Any = None,
-        events: Any = None,
+        notifier: Notifier | None = None,
         sleep: Any = time.sleep,
     ) -> None:
-        super().__init__(queue_url, region, sqs)
+        super().__init__(queue)
         self._session_factory = session_factory
-        self._bus_name = bus_name
-        self._events = events
-        self._region = region
+        self._notifier = notifier
         self._sleep = sleep
 
-    def handle(self, message: dict[str, Any]) -> bool:
+    def handle(self, body: str) -> bool:
         try:
-            event = EventMessage.from_json(message["Body"])
+            event = EventMessage.from_json(body)
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
             # A message that cannot be read will never succeed; the DLQ collects it.
             metrics.EVENTS_PROCESSED.labels(result="error").inc()
@@ -146,9 +133,9 @@ class EventWorker(QueueWorker):
         return True
 
     def _announce(self, event: EventMessage) -> None:
-        """Put the change on the event bus, after the commit. A failure here loses the notification
-        and not the data (the dual-write trade-off in the design)."""
-        if not self._bus_name:
+        """Announce the change, after the commit. A failure here loses the notification and not the
+        data (the dual-write trade-off in the design)."""
+        if self._notifier is None:
             return
         with self._session_factory() as session:
             tracking_number = session.scalar(
@@ -161,29 +148,19 @@ class EventWorker(QueueWorker):
             "status": event.event_type.value,
             "occurred_at": event.occurred_at.isoformat().replace("+00:00", "Z"),
         }
-        entry = {
-            "Source": "shiptrack.events",
-            "DetailType": NOTIFIED[event.event_type],
-            "Detail": json.dumps(detail),
-            "EventBusName": self._bus_name,
-        }
-        client = self._events or boto3.client("events", region_name=self._region)
-        for attempt in range(PUT_EVENTS_ATTEMPTS):
+        for attempt in range(NOTIFY_ATTEMPTS):
             try:
-                response = client.put_events(Entries=[entry])
-                if response.get("FailedEntryCount", 0) == 0:
-                    return
-                error = "failed entry"
-            except (ClientError, BotoCoreError) as exc:
-                error = type(exc).__name__
-            log.warning("put_events_failed", attempt=attempt + 1, error=error)
-            if attempt + 1 < PUT_EVENTS_ATTEMPTS:
+                self._notifier.send(NOTIFIED[event.event_type], detail)
+                return
+            except NotificationFailedError as exc:
+                log.warning("notification_send_failed", attempt=attempt + 1, error=str(exc))
+            if attempt + 1 < NOTIFY_ATTEMPTS:
                 self._sleep(0.2 * 2**attempt)
         log.error("notification_lost", idempotency_key=event.idempotency_key)
 
 
 class NotifyWorker(QueueWorker):
-    """Consumes the notifications queue (an EventBridge envelope per message).
+    """Consumes the notifications queue (one envelope with `detail-type` and `detail` per message).
 
     It is idempotent on `detail.event_id` through a small in-memory cache. The window is bounded and
     documented: a repeat after a restart or past the cache is sent again.
@@ -191,8 +168,8 @@ class NotifyWorker(QueueWorker):
 
     CACHE_SIZE = 1000
 
-    def __init__(self, queue_url: str, region: str | None = None, sqs: Any = None) -> None:
-        super().__init__(queue_url, region, sqs)
+    def __init__(self, queue: MessageQueue) -> None:
+        super().__init__(queue)
         self._seen: OrderedDict[str, None] = OrderedDict()
 
     def _is_repeat(self, event_id: str) -> bool:
@@ -204,9 +181,9 @@ class NotifyWorker(QueueWorker):
             self._seen.popitem(last=False)
         return False
 
-    def handle(self, message: dict[str, Any]) -> bool:
+    def handle(self, body: str) -> bool:
         try:
-            envelope = json.loads(message["Body"])
+            envelope = json.loads(body)
             detail = envelope["detail"]
             detail_type = envelope["detail-type"]
             event_id = detail["event_id"]

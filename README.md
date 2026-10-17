@@ -1,11 +1,11 @@
 # shiptrack-modern
 
-ShipTrack v2: the "after" stack of the EC2-to-EKS migration. The same API and UI as
-[`shiptrack-legacy`](https://github.com/loriamichaelj/shiptrack-legacy), running on EKS, with each
-of legacy's anti-patterns fixed. The fork is recorded, not hidden: the first commit imports legacy
-`v1.0.0` unmodified (`docs/FORK.md`), and every later change to the application names the
-remediation it implements (`REM-01` to `REM-16`, design §2) in its pull request and in the squash
-commit that lands it.
+ShipTrack v2: the target workload of the ShipTrack cloud migration. The same API and UI as the source
+workload, [`shiptrack-legacy`](https://github.com/loriamichaelj/shiptrack-legacy), replatformed onto EKS
+and refactored where a lift could not fix a defect, so that each of legacy's anti-patterns is
+remediated. The fork is recorded, not hidden: the first commit imports legacy `v1.0.0` unmodified
+(`docs/FORK.md`), and every later change to the application names the remediation it implements
+(`REM-01` to `REM-16`, design §2) in its pull request and in the squash commit that lands it.
 
 - Design: [`docs/DESIGN.md`](docs/DESIGN.md)
 - Decisions: [`docs/ADR.md`](docs/ADR.md)
@@ -18,18 +18,62 @@ The API contract is frozen: it behaves exactly as legacy design §3.4 says, plus
 additions (design §1). The UI in `web/` is modern's own and is no longer held to legacy's build
 (ADR-0024); legacy keeps its original UI.
 
-## What changed from legacy
+## Migration strategy
 
-| Area | Modern |
-|---|---|
-| Configuration and credentials | Environment settings; database credentials from Secrets Manager with a cache that refetches on an authentication failure (REM-01, REM-02) |
-| Events | API puts them on SQS; `worker-events` applies them and publishes domain events to EventBridge; `worker-notify` consumes notifications (REM-06) |
-| Proof of delivery | Objects in S3, downloaded through a short-lived presigned redirect (REM-05) |
-| SLA scan | One statement flags breaches and records alerts, run as a CronJob (REM-09) |
-| Health | `/healthz` never checks dependencies; `/readyz` checks the database and the schema revision (REM-07) |
-| Observability | JSON logs with a request ID; Prometheus metrics on port 9090 only (REM-08, REM-15) |
-| UI and headers | Served by the API from the image, with a strict CSP and security headers (REM-16) |
-| Delivery | A multi-arch, non-root image by digest; a Helm chart; Terraform for the cluster; pipelines through OIDC |
+ShipTrack is a cloud migration. The workload moves from EC2 hosts behind an ALB to containers on EKS,
+one wave of traffic at a time, and the same image is then taken to AKS and GKE
+([`shiptrack-modern-azure`](https://github.com/loriamichaelj/shiptrack-modern-azure),
+[`shiptrack-modern-gcp`](https://github.com/loriamichaelj/shiptrack-modern-gcp)). The strategy for each
+part of the workload is chosen from the **7 Rs** that AWS Prescriptive Guidance defines in
+[About the migration strategies](https://docs.aws.amazon.com/prescriptive-guidance/latest/large-migration-guide/migration-strategies.html):
+retire, retain, rehost, relocate, repurchase, replatform, and refactor or re-architect.
+
+**Assessment.** The source stack (`shiptrack-legacy`) carries sixteen anti-patterns on purpose
+(`AP-01` to `AP-16`, legacy design §4). Each is a finding that the assessment has to surface and the
+migration has to resolve. Their classification is **replatform, then refactor** (legacy design §9). A
+rehost alone would carry the worst of them to the new platform unchanged: an in-process event queue
+that loses events at a restart (`AP-06`), proof-of-delivery files on one host's disk that only sticky
+routing hides (`AP-05`), and an SLA scan that runs on every host (`AP-09`).
+
+**The seven Rs in ShipTrack**
+
+| R | What AWS means by it | In ShipTrack |
+|---|---|---|
+| Retire | Decommission or archive the application | The source stack's scheduled jobs (the SLA scan and the proof-of-delivery sync) are removed in Wave 3, and its local-disk proof-of-delivery store is retired by the move to S3. The stack as a whole is not retired: it stays as the fallback |
+| Retain | Keep the application in the source environment | The source stack keeps running behind the preview port as the fallback (platform ADR-0032). The shared PostgreSQL database and its schema, the frozen API contract, and the source stack's original minimal UI are kept as they are |
+| Rehost | Lift and shift, with no changes | Not used for the application, for the reason above. The source stack is itself the baseline that the assessment measures |
+| Relocate | Move to the cloud version of the same platform, or to another VPC, Region, or account | Not used. Both stacks run in one account and one VPC and share the platform's ALB and database; the cutover moves traffic, not servers |
+| Repurchase | Replace the application with a different product, usually SaaS | Not used for the application. ShipTrack is built, not bought |
+| Replatform | Move to the cloud with some optimization and no change to the core architecture | EC2 hosts become containers on EKS, with immutable images by digest, rolling deploys, pod autoscaling (HPA and KEDA) on arm64 nodes, and one identity and role per workload (`REM-03`, `REM-04`, `REM-10` to `REM-12`, `REM-14`). Logs and metrics are collected by managed services (the CloudWatch Observability add-on and Amazon Managed Prometheus). On Azure and GCP the same image runs on AKS and GKE against each cloud's managed database, queue, secret store, and object storage, through the cloud seam (modern ADR-0032) |
+| Refactor | Change the architecture to use cloud-native features | The three architectural defects are redesigned: the in-process queue becomes SQS, a worker, and EventBridge (`REM-06`); proof-of-delivery files move from host disk to S3 behind a presigned redirect (`REM-05`); and the cron job on every host becomes one CronJob with one atomic statement (`REM-09`). The application also gains credentials from Secrets Manager, real health probes, structured logs, and metrics (`REM-01`, `REM-02`, `REM-07`, `REM-08`, `REM-15`, `REM-16`) |
+
+AWS advises refactoring in a large migration only when the other strategies are not acceptable,
+because it is the most complex and costly. For one application with these three defects they were not
+acceptable, so the migration replatforms the runtime and refactors only the parts that a lift could
+not fix. Every refactor is its own pull request that names its `REM-xx`.
+
+**Cutover.** Traffic moves in waves by changing weights on the platform's ALB, by pull request in
+`shiptrack-platform`: Wave 0 dark launch, Wave 1 the read path and the UI, Wave 2 the write path, a
+handoff of schema ownership, and Wave 3 the scheduled jobs. Both stacks answer with an
+`X-ShipTrack-Stack` header, so a test that landed on the wrong stack fails. Rolling back is changing the
+weights back (modern design §9).
+
+## Remediations: what changed from the source stack
+
+Each row is a remediation of one or more of legacy's anti-patterns, and the last column is the migration
+strategy it belongs to.
+
+| Area | Target stack | Strategy |
+|---|---|---|
+| Configuration and credentials | Environment settings; database credentials from Secrets Manager with a cache that refetches on an authentication failure (REM-01, REM-02) | Refactor |
+| Events | API puts them on SQS; `worker-events` applies them and publishes domain events to EventBridge; `worker-notify` consumes notifications (REM-06) | Refactor |
+| Proof of delivery | Objects in S3, downloaded through a short-lived presigned redirect (REM-05) | Refactor |
+| SLA scan | One statement flags breaches and records alerts, run as a CronJob (REM-09) | Refactor |
+| Health | `/healthz` never checks dependencies; `/readyz` checks the database and the schema revision (REM-07) | Refactor |
+| Observability | JSON logs with a request ID; Prometheus metrics on port 9090 only (REM-08, REM-15) | Refactor |
+| UI and headers | Served by the API from the image, with a strict CSP and security headers (REM-16) | Refactor |
+| Compute, identity, and deploys | Containers on arm64 EKS nodes with pod autoscaling; one service account and role per workload; immutable images by digest with rolling updates (REM-03, REM-04, REM-10 to REM-12, REM-14) | Replatform |
+| Delivery | A multi-arch, non-root image by digest; a Helm chart; Terraform for the cluster; pipelines through OIDC; security scans in CI (REM-13) | Replatform |
 
 ## Architecture
 
@@ -63,11 +107,11 @@ flowchart TB
         obs["Alarms, SNS sev1 and sev2,<br/>cutover dashboard"]
     end
 
-    subgraph legacy["shiptrack-legacy: the before stack"]
+    subgraph legacy["shiptrack-legacy: source stack"]
         asg["ASG: 2 EC2 hosts<br/>nginx, gunicorn, FastAPI"]
     end
 
-    subgraph modern["shiptrack-modern: the after stack"]
+    subgraph modern["shiptrack-modern: target stack"]
         eks["EKS pods: api, worker-events,<br/>worker-notify, sla-scan"]
         msg["SQS queues and<br/>EventBridge bus"]
     end
@@ -451,7 +495,7 @@ flowchart TB
     log -.-> chrome
 ```
 
-#### Event ingestion, before and after
+#### Event ingestion in the source and target stacks
 
 Legacy answers `202` before the event is stored, so a restart loses what is in the queue (AP-06).
 Modern answers `202` once SQS holds the event, and a worker applies it later (REM-06).

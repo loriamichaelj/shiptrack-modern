@@ -16,10 +16,7 @@ request and in the squash commit that lands it.
 - The UI, page by page: [`docs/UI.md`](docs/UI.md). Watching traffic in Grafana: [`docs/GRAFANA.md`](docs/GRAFANA.md)
 
 The API contract is frozen: it behaves exactly as the legacy design says, plus a short list of additions.
-The UI in `web/` is modern's own; legacy keeps its original minimal UI. A *proof of delivery* is the
-document a carrier produces when a shipment is delivered, and a *pod* is only ever a Kubernetes pod; names
-that stored data and the contract depend on, such as the `/pod` API paths and the `pod_documents` table,
-keep the old abbreviation.
+The UI in `web/` is modern's own; legacy keeps its original minimal UI.
 
 ## Migration strategy
 

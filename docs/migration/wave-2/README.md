@@ -27,7 +27,7 @@ Procedure: platform
 
 | Criterion | Result |
 |---|---|
-| G1 to G5 pass at each step | Pass at 2a, 2b, 2c and 2d, with G3 judged per route from 2d (platform ADR-0031) |
+| G1 to G5 pass at each step | Pass at 2a, 2b, 2c and 2d, with G3 judged per route from 2d |
 | DLQ = 0 | Yes: both DLQs 0 at every step |
 | Simulator ledger shows 0 lost events for modern-routed traffic | Yes: 402 of 402 pinned to modern; 200 of 200 at 100% modern. The one event missing from the mixed run at 50% is most likely legacy's (AP-06), see step 2c |
 | No `pod_not_migrated` for a proof of delivery older than 5 minutes | Yes: G-POD 0 at every step |

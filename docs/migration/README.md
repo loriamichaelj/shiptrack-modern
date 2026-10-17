@@ -3,7 +3,7 @@
 What was done to move traffic from legacy to modern, and what showed it was safe: one folder per
 wave, written as each step happens. The procedure is the platform's
 [`docs/runbooks/cutover.md`](https://github.com/loriamichaelj/shiptrack-platform/blob/dev/docs/runbooks/cutover.md);
-the design is [`../DESIGN.md`](../DESIGN.md) §9.
+the design is [`../DESIGN.md`](../DESIGN.md).
 
 | Folder | Wave |
 |---|---|

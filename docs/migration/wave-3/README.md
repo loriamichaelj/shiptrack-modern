@@ -2,8 +2,8 @@
 
 Procedure: platform
 [`cutover.md`](https://github.com/loriamichaelj/shiptrack-platform/blob/dev/docs/runbooks/cutover.md#handoff-schema-ownership).
-Legacy is kept running as a fallback and nothing is destroyed (platform ADR-0032, modern
-[ADR-0023](../../ADR.md#adr-0023-contract-migration-not-taken)).
+Legacy is kept running as a fallback and nothing is destroyed (see the
+[decision not to take the contract migration](../../ADR.md#adr-0023-contract-migration-not-taken)).
 
 ## Entry
 
@@ -24,8 +24,8 @@ Legacy is kept running as a fallback and nothing is destroyed (platform ADR-0032
 | 1. Remove legacy's crons | Sync cron and SLA cron removed on both hosts; `status` reads `sla=absent podsync=absent` on both | legacy runs [38175769559](https://github.com/loriamichaelj/shiptrack-legacy/actions/runs/38175769559), [38176233513](https://github.com/loriamichaelj/shiptrack-legacy/actions/runs/38176233513), [38176454187](https://github.com/loriamichaelj/shiptrack-legacy/actions/runs/38176454187) |
 | 2. Modern CronJob on, heartbeat alarm enabled | Applied and deployed | [modern #30](https://github.com/loriamichaelj/shiptrack-modern/pull/30), apply [38177119943](https://github.com/loriamichaelj/shiptrack-modern/actions/runs/38177119943), deploy [38177131864](https://github.com/loriamichaelj/shiptrack-modern/actions/runs/38177131864) |
 | 3. Exactly one alert per breach | `contract-sla`: 3 overdue shipments flagged within 31 s and not touched again; then `SLA_DUPLICATES shipments=0 extra_alerts=0 alerts=3` | platform run [38178609695](https://github.com/loriamichaelj/shiptrack-platform/actions/runs/38178609695), legacy evidence run [38178711864](https://github.com/loriamichaelj/shiptrack-legacy/actions/runs/38178711864) |
-| 4. Contract migration | **Not taken** (ADR-0023) | |
-| 5 and 6. Legacy scaled to zero and destroyed | **Not taken**: legacy keeps its hosts and target group, and its UI is on the preview port | platform [#48](https://github.com/loriamichaelj/shiptrack-platform/pull/48), ADR-0032 |
+| 4. Contract migration | **Not taken** | |
+| 5 and 6. Legacy scaled to zero and destroyed | **Not taken**: legacy keeps its hosts and target group, and its UI is on the preview port | platform [#48](https://github.com/loriamichaelj/shiptrack-platform/pull/48) |
 
 ## Found and fixed during the wave
 

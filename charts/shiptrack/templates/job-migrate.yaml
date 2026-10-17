@@ -23,6 +23,10 @@ spec:
       automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
       securityContext:
         {{- include "shiptrack.podSecurityContext" . | nindent 8 }}
+      {{- if .Values.spot }}
+      nodeSelector:
+        {{- include "shiptrack.spotSelector" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: migrate
           image: {{ include "shiptrack.image" . | quote }}
@@ -30,8 +34,13 @@ spec:
           args: ["migrate"]
           env:
             {{- include "shiptrack.commonEnv" . | nindent 12 }}
+            {{- if eq .Values.cloud "gcp" }}
+            - name: SHIPTRACK_DB_MIGRATOR_SECRET_NAME
+              value: {{ required "gcp.dbMigratorSecretName is required" .Values.gcp.dbMigratorSecretName | quote }}
+            {{- else }}
             - name: SHIPTRACK_DB_MIGRATOR_SECRET_ARN
               value: {{ required "aws.dbMigratorSecretArn is required" .Values.aws.dbMigratorSecretArn | quote }}
+            {{- end }}
             - name: SHIPTRACK_DB_POOL_SIZE
               value: {{ .Values.migrations.pool.size | quote }}
             - name: SHIPTRACK_DB_MAX_OVERFLOW

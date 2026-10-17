@@ -2,6 +2,11 @@
 # URLs, the target group, secret ARNs) come from scripts/render-values.sh, and the image from the
 # deploy workflow. Nothing here is a secret: the pods read their credentials from Secrets Manager.
 
+# Which cloud the release runs on: aws, or gcp. Each cloud has its own block of settings below, and
+# the schema requires the block of the selected cloud only. AWS is the default and its render is the
+# one the chart was built for.
+cloud: aws
+
 image:
   repository: ""
   # Deployments reference the digest, never a tag.
@@ -25,6 +30,27 @@ aws:
   podBucket: ""
   dbSecretArn: ""
   dbMigratorSecretArn: ""
+
+# GCP. Identifying values (the project, the signer's address) are passed with --set from masked
+# secrets at deploy time. Credentials come from Workload Identity Federation for GKE, not from here.
+gcp:
+  project: ""
+  dbSecretName: ""
+  dbMigratorSecretName: ""
+  eventsTopic: ""
+  eventsSubscription: ""
+  notifyTopic: ""
+  notifySubscription: ""
+  proofOfDeliveryBucket: ""
+  proofOfDeliverySigner: ""
+
+# Run every pod on GKE Spot capacity. GCP only.
+spot: false
+
+scaling:
+  # keda: the api is scaled by an HPA and the workers by KEDA from the queue depth.
+  # fixed: the replica counts below, with neither an HPA nor a KEDA object. Required on GCP.
+  mode: keda
 
 logLevel: INFO
 # The Alembic revisions this build tolerates; /readyz fails when the database is on another one.
@@ -55,6 +81,8 @@ api:
   pdb: { minAvailable: 1 }
 
 workerEvents:
+  # Used when scaling.mode is fixed.
+  replicas: 1
   terminationGracePeriodSeconds: 90
   pool: { size: 2, maxOverflow: 0 }
   resources:
@@ -64,6 +92,8 @@ workerEvents:
   pdb: { maxUnavailable: 1 }
 
 workerNotify:
+  # Used when scaling.mode is fixed.
+  replicas: 1
   terminationGracePeriodSeconds: 60
   resources:
     requests: { cpu: 50m, memory: 128Mi }

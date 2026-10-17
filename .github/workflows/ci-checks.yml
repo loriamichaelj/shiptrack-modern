@@ -243,6 +243,7 @@ jobs:
         run: |
           helm lint charts/shiptrack -f charts/shiptrack/ci-values.yaml
           helm lint charts/shiptrack -f charts/shiptrack/ci-values.yaml -f charts/shiptrack/values-dev.yaml --set migrations.enabled=true
+          helm lint charts/shiptrack -f charts/shiptrack/ci-values-gcp.yaml
       - name: Install kubeconform
         run: |
           url="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
@@ -251,13 +252,14 @@ jobs:
           mkdir "$RUNNER_TEMP/kubeconform-bin"
           tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP/kubeconform-bin" kubeconform
           echo "$RUNNER_TEMP/kubeconform-bin" >>"$GITHUB_PATH"
-      # Both renders: the default one, and the one with the migration hook.
+      # The renders: the default one, the one with the migration hook, and the GCP one.
       - name: Render and validate (strict, with the CRD schemas)
         run: |
           crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
           mkdir rendered
           helm template shiptrack charts/shiptrack -f charts/shiptrack/ci-values.yaml -f charts/shiptrack/values-dev.yaml >rendered/default.yaml
           helm template shiptrack charts/shiptrack -f charts/shiptrack/ci-values.yaml --set migrations.enabled=true >rendered/migrations.yaml
+          helm template shiptrack charts/shiptrack -f charts/shiptrack/ci-values-gcp.yaml >rendered/gcp.yaml
           for f in rendered/*.yaml; do
             kubeconform -strict -summary -kubernetes-version 1.34.0 \
               -schema-location default -schema-location "$crds" "$f"

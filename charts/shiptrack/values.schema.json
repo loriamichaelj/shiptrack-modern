@@ -1,8 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["image", "region", "vpcCidr", "alb", "aws", "api", "workerEvents", "workerNotify", "slaScan", "migrations"],
+  "required": ["cloud", "image", "api", "workerEvents", "workerNotify", "slaScan", "migrations"],
   "properties": {
+    "cloud": { "enum": ["aws", "gcp"] },
+    "spot": { "type": "boolean" },
+    "scaling": {
+      "type": "object",
+      "properties": { "mode": { "enum": ["keda", "fixed"] } }
+    },
     "image": {
       "type": "object",
       "required": ["repository", "digest"],
@@ -13,32 +19,12 @@
       }
     },
     "region": { "type": "string", "minLength": 1 },
-    "vpcCidr": { "type": "string", "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$" },
+    "vpcCidr": { "type": "string" },
     "baseUrl": { "type": "string" },
     "logLevel": { "enum": ["DEBUG", "INFO", "WARNING", "ERROR"] },
     "schemaCompat": { "type": "string", "pattern": "^[0-9A-Za-z_]+(,[0-9A-Za-z_]+)*$" },
     "faultErrorRate": { "type": "string", "pattern": "^(0|1|0?\\.[0-9]+)$" },
     "faultReadyFail": { "type": "boolean" },
-    "alb": {
-      "type": "object",
-      "required": ["targetGroupArn", "securityGroupId"],
-      "properties": {
-        "targetGroupArn": { "type": "string", "pattern": "^arn:aws[a-z-]*:elasticloadbalancing:[a-z0-9-]+:[^:]+:targetgroup/.+$" },
-        "securityGroupId": { "type": "string", "pattern": "^sg-[0-9a-f]{8,17}$" }
-      }
-    },
-    "aws": {
-      "type": "object",
-      "required": ["eventsQueueUrl", "notifyQueueUrl", "eventBusName", "podBucket", "dbSecretArn", "dbMigratorSecretArn"],
-      "properties": {
-        "eventsQueueUrl": { "type": "string", "pattern": "^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/.+$" },
-        "notifyQueueUrl": { "type": "string", "pattern": "^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/.+$" },
-        "eventBusName": { "type": "string", "minLength": 1 },
-        "podBucket": { "type": "string", "minLength": 3 },
-        "dbSecretArn": { "type": "string", "pattern": "^arn:aws[a-z-]*:secretsmanager:.+$" },
-        "dbMigratorSecretArn": { "type": "string", "pattern": "^arn:aws[a-z-]*:secretsmanager:.+$" }
-      }
-    },
     "serviceAccount": {
       "type": "object",
       "properties": { "automountToken": { "type": "boolean" } }
@@ -68,6 +54,7 @@
       "type": "object",
       "required": ["keda", "pool"],
       "properties": {
+        "replicas": { "type": "integer", "minimum": 1 },
         "pool": { "$ref": "#/definitions/pool" },
         "keda": { "$ref": "#/definitions/keda" }
       }
@@ -75,7 +62,10 @@
     "workerNotify": {
       "type": "object",
       "required": ["keda"],
-      "properties": { "keda": { "$ref": "#/definitions/keda" } }
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1 },
+        "keda": { "$ref": "#/definitions/keda" }
+      }
     },
     "slaScan": {
       "type": "object",
@@ -99,7 +89,70 @@
       "properties": { "enabled": { "type": "boolean" } }
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "cloud": { "const": "aws" } } },
+      "then": {
+        "required": ["region", "vpcCidr", "alb", "aws"],
+        "properties": {
+          "vpcCidr": { "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$" },
+          "spot": { "const": false },
+          "alb": {
+            "type": "object",
+            "required": ["targetGroupArn", "securityGroupId"],
+            "properties": {
+              "targetGroupArn": { "type": "string", "pattern": "^arn:aws[a-z-]*:elasticloadbalancing:[a-z0-9-]+:[^:]+:targetgroup/.+$" },
+              "securityGroupId": { "type": "string", "pattern": "^sg-[0-9a-f]{8,17}$" }
+            }
+          },
+          "aws": {
+            "type": "object",
+            "required": ["eventsQueueUrl", "notifyQueueUrl", "eventBusName", "podBucket", "dbSecretArn", "dbMigratorSecretArn"],
+            "properties": {
+              "eventsQueueUrl": { "type": "string", "pattern": "^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/.+$" },
+              "notifyQueueUrl": { "type": "string", "pattern": "^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/.+$" },
+              "eventBusName": { "type": "string", "minLength": 1 },
+              "podBucket": { "type": "string", "minLength": 3 },
+              "dbSecretArn": { "type": "string", "pattern": "^arn:aws[a-z-]*:secretsmanager:.+$" },
+              "dbMigratorSecretArn": { "type": "string", "pattern": "^arn:aws[a-z-]*:secretsmanager:.+$" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "cloud": { "const": "gcp" } } },
+      "then": {
+        "required": ["gcp", "scaling"],
+        "properties": {
+          "scaling": { "required": ["mode"], "properties": { "mode": { "const": "fixed" } } },
+          "gcp": {
+            "type": "object",
+            "required": [
+              "project", "dbSecretName", "dbMigratorSecretName", "eventsTopic", "eventsSubscription",
+              "notifyTopic", "notifySubscription", "proofOfDeliveryBucket", "proofOfDeliverySigner"
+            ],
+            "properties": {
+              "project": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$" },
+              "dbSecretName": { "$ref": "#/definitions/gcpName" },
+              "dbMigratorSecretName": { "$ref": "#/definitions/gcpName" },
+              "eventsTopic": { "$ref": "#/definitions/gcpName" },
+              "eventsSubscription": { "$ref": "#/definitions/gcpName" },
+              "notifyTopic": { "$ref": "#/definitions/gcpName" },
+              "notifySubscription": { "$ref": "#/definitions/gcpName" },
+              "proofOfDeliveryBucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$" },
+              "proofOfDeliverySigner": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "definitions": {
+    "gcpName": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._~+%-]{2,254}$" },
     "pool": {
       "type": "object",
       "required": ["size", "maxOverflow"],

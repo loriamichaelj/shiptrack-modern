@@ -64,8 +64,15 @@ capabilities:
 
 {{/* Settings every role shares. Roles add their own on top. */}}
 {{- define "shiptrack.commonEnv" -}}
+{{- if eq .Values.cloud "gcp" -}}
+- name: SHIPTRACK_CLOUD
+  value: "gcp"
+- name: SHIPTRACK_GCP_PROJECT
+  value: {{ required "gcp.project is required" .Values.gcp.project | quote }}
+{{ else -}}
 - name: AWS_REGION
   value: {{ .Values.region | quote }}
+{{ end -}}
 - name: SHIPTRACK_LOG_LEVEL
   value: {{ .Values.logLevel | quote }}
 - name: SHIPTRACK_SCHEMA_COMPAT
@@ -74,10 +81,20 @@ capabilities:
 
 {{/* The database settings for a role, with that role's pool. */}}
 {{- define "shiptrack.dbEnv" -}}
+{{- if eq .root.Values.cloud "gcp" -}}
+- name: SHIPTRACK_DB_SECRET_NAME
+  value: {{ required "gcp.dbSecretName is required" .root.Values.gcp.dbSecretName | quote }}
+{{ else -}}
 - name: SHIPTRACK_DB_SECRET_ARN
   value: {{ required "aws.dbSecretArn is required" .root.Values.aws.dbSecretArn | quote }}
+{{ end -}}
 - name: SHIPTRACK_DB_POOL_SIZE
   value: {{ .pool.size | quote }}
 - name: SHIPTRACK_DB_MAX_OVERFLOW
   value: {{ .pool.maxOverflow | quote }}
+{{- end -}}
+
+{{/* GKE Autopilot runs a pod on Spot capacity when it selects this node label (ADR-0005 in the GCP repository). */}}
+{{- define "shiptrack.spotSelector" -}}
+cloud.google.com/gke-spot: "true"
 {{- end -}}

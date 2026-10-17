@@ -439,3 +439,19 @@ Where the clouds differ, the port states the common behavior and the implementat
 - On GCP, log records also carry `severity` and `message`, which Cloud Logging reads; every other field is unchanged.
 
 **Consequences:** AWS behavior is unchanged: the AWS tests assert the same calls, with their construction moved to the queue and notifier classes, and one log event is renamed (`put_events_failed` is `notification_send_failed`, and nothing reads it). The image gains the Google client libraries, about 15 MB compressed (77 MB to 92 MB; the target is 200 MB). The GCP ports are tested with fakes and, in `tests/integration/test_gcp_emulators.py`, against the Pub/Sub emulator and a fake Cloud Storage server that CI and `compose --profile gcp` start by digest. The emulators cover filters, dead-lettering, and a real resumable upload; Secret Manager and the IAM signing call behind a signed URL have no emulator, so the first GCP deployment is what proves them. The Azure target adds its own literal and package without changing these ports.
+
+## ADR-0033: chart-cloud-switches
+
+**Status:** Accepted
+
+**Context:** The chart was written for EKS: it renders a `TargetGroupBinding`, KEDA objects and an HPA, reads an `aws` block of settings, and admits the load balancer and the metrics scraper by VPC CIDR. GCP needs a different set (GCP repository design §5.6) and the Azure target will need a third, and the AWS render must not change (ADR-0032).
+
+**Decision:** The chart gains four values and keeps AWS as the default of each:
+- `cloud` (`aws` or `gcp`) selects the block of settings and the objects rendered. A cloud's settings are checked by the schema only when that cloud is selected, so a GCP release needs no AWS value and the reverse.
+- `scaling.mode` (`keda` or `fixed`) selects between the HPA and KEDA and fixed replica counts. GCP requires `fixed` (GCP repository ADR-0012); the replicas have values for the workers, and the api keeps `api.replicas`.
+- `spot` puts every pod on GKE Spot capacity with the node selector. It is refused on AWS, where no node carries the label.
+- `gcp` holds the project, the secret names, the topics and subscriptions, the proof-of-delivery bucket, and the signer. The project and signer are not committed; the GCP repository passes them with `--set` from masked secrets.
+
+For `gcp` the chart also renders a `PodMonitoring` for port 9090 every 60 seconds, network policies by namespace selector (managed collectors only; the api has no ingress), and no service account annotation. Nothing is rendered for a Gateway; that is a separate change if it is wanted (GCP repository ADR-0013).
+
+**Consequences:** `helm template` with the AWS values gives byte-for-byte the output it gave before, checked against the previous render when this was built and by the existing chart tests. CI also renders the GCP stub values and validates them with kubeconform, with the `PodMonitoring` schema from the CRD catalog, and runs checkov on both. The collectors' namespace and the node selector's effect on Autopilot are checked on the first deployment **[VERIFY]**. Azure adds its own value to `cloud`, its own block, and its own objects without changing these.

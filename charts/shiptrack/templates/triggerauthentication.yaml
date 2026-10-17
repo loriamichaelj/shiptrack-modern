@@ -1,3 +1,4 @@
+{{- if eq .Values.scaling.mode "keda" }}
 {{- /* The KEDA operator's own Pod Identity credentials (the default identity owner) read the queues. */ -}}
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
@@ -8,3 +9,4 @@ metadata:
 spec:
   podIdentity:
     provider: aws
+{{- end }}

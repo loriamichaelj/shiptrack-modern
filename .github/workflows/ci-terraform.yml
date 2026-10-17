@@ -24,8 +24,12 @@ env:
 
 jobs:
   plan:
-    # Forks receive no OIDC token, so the plan role is unreachable from them.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Forks and Dependabot receive no OIDC token and none of the repository's secrets (Dependabot has
+    # its own secret store and a read-only token), so the plan role is unreachable from them. A
+    # provider bump from Dependabot is planned when it is applied, after approval (ADR-0036).
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     permissions:
       id-token: write

@@ -455,3 +455,15 @@ Where the clouds differ, the port states the common behavior and the implementat
 For `gcp` the chart also renders a `PodMonitoring` for port 9090 every 60 seconds, network policies by namespace selector (managed collectors only; the api has no ingress), and no service account annotation. Nothing is rendered for a Gateway; that is a separate change if it is wanted (GCP repository ADR-0013).
 
 **Consequences:** `helm template` with the AWS values gives byte-for-byte the output it gave before, checked against the previous render when this was built and by the existing chart tests. CI also renders the GCP stub values and validates them with kubeconform, with the `PodMonitoring` schema from the CRD catalog, and runs checkov on both. The collectors' namespace and the node selector's effect on Autopilot are checked on the first deployment **[VERIFY]**. Azure adds its own value to `cloud`, its own block, and its own objects without changing these.
+
+## ADR-0034: ghcr-publish
+
+**Status:** Accepted
+
+**Context:** The Azure and GCP targets run the digest that runs on AWS, and they cannot pull from ECR, which serves the owning account only. Both of their designs publish the merged image to GHCR as a public package (Azure ADR-0005, GCP ADR-0021), and ask for this to be one pull request in this repository. `deploy-app` starts when `release-image` ends successfully, so anything added to `release-image` can delay or stop AWS deploys.
+
+**Decision:** `release-image.yml` gains a job, `publish-ghcr`, that runs after the merge job and its Trivy gate. It copies the merged index from ECR to `ghcr.io/<owner>/shiptrack-modern` (the repository's name, lower-cased) with `crane copy`, which moves the manifests and layers unchanged, so the index keeps its digest. `docker buildx imagetools create` is not used: its source manifests must already be in the registry it writes to. The job tags `sha-<full git sha>`, then reads the digest back by tag and by digest and fails if either differs from the one ECR gave, refuses to move an existing tag to another digest, and pulls the digest without credentials, which fails while the package is private. `crane` is a pinned release whose SHA-256 is checked. The job logs in to GHCR with `GITHUB_TOKEN`, with `packages: write` on this job only, and to ECR with the release role it already uses; no credential is added.
+
+The job has `continue-on-error: true`. A failure shows as a failed job with an error annotation, and the workflow stays successful, so the AWS deploy does not depend on GHCR. The cost is that a missing GHCR image is noticed in the run, or when a target deploys, and not by a red release.
+
+**Consequences:** One digest is in two registries, and the two targets deploy it by digest. A new GHCR package starts private, so the first run fails its anonymous pull; one change of visibility to public in the package settings, then a rerun of the job, completes it. The package carries the image's `org.opencontainers.image.source` label, which links it to this repository. Storage in GHCR for a public package is free. A rerun for the same commit finds the tag and the same digest and succeeds again.

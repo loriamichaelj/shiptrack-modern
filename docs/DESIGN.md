@@ -627,7 +627,8 @@ All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyi
 2. buildx multi-arch → push the per-arch digests. Assert identical `/app/web/dist/assets` listings across architectures; then merge into `sha-<sha>`.
 3. Trivy scan of the **pushed digest** (gate).
 4. Output the digest.
-5. Optional stretch: cosign keyless signing + SBOM attestation.
+5. `publish-ghcr`: copy the merged index to GHCR with `crane`, unchanged, and assert that the digest there equals the one in ECR and that the package can be pulled anonymously (ADR-0034). A failure in this job leaves the release green, so `deploy-app` never waits on GHCR.
+6. Optional stretch: cosign keyless signing + SBOM attestation.
 
 ### 10.3 `deploy-app.yml` (`workflow_run` on release success, or `workflow_dispatch` with a digest)
 - `environment: dev` (required reviewers); `concurrency: deploy-dev` (no cancel)

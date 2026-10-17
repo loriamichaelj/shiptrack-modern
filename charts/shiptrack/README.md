@@ -1,8 +1,7 @@
 # shiptrack chart
 
 The Helm chart for ShipTrack on EKS and, with `cloud: gcp`, on GKE: the API, the events and
-notification workers, the SLA scan CronJob, and the migration Job. The design is `docs/DESIGN.md` §7;
-the cloud switches are ADR-0033.
+notification workers, the SLA scan CronJob, and the migration Job. The design is `docs/DESIGN.md`.
 
 The chart installs into the `shiptrack` namespace, which `terraform/addons` creates, with the
 Pod Security `restricted` profile and the ALB readiness-gate label. It needs the load balancer
@@ -13,7 +12,7 @@ controller and KEDA, also from `terraform/addons`.
 | File | Holds |
 |---|---|
 | `values.yaml` | Safe defaults for everything |
-| `values-dev.yaml` | Replicas, scaling, and pool sizes for dev. A unit test checks them against the database connection budget (ADR-0002) |
+| `values-dev.yaml` | Replicas, scaling, and pool sizes for dev. A unit test checks them against the database connection budget |
 | `generated-values.yaml` | Not committed. `scripts/render-values.sh` writes it from the SSM contract: the queue URLs, bucket, secret ARNs, target group, security group, VPC CIDR, and image repository |
 | `ci-values.yaml` | Placeholders for `helm lint`, `helm template`, and kubeconform |
 | `ci-values-gcp.yaml` | The same placeholders for `cloud: gcp`. The GCP repository holds the real GCP values and passes the identifying ones with `--set` |
@@ -29,8 +28,8 @@ not `sha256:<64 hex>`. The image is always referenced by digest.
 | `scaling.mode` | `keda` | `keda`: an HPA for the api and KEDA for the workers. `fixed`: the replica counts (`api.replicas`, `workerEvents.replicas`, `workerNotify.replicas`) with neither. GCP requires `fixed` |
 | `spot` | `false` | GCP only. Puts every pod on GKE Spot capacity with the `cloud.google.com/gke-spot` node selector. The schema refuses it on AWS |
 | `slaScan.suspend` | `true` | The SLA scan CronJob stays suspended until the legacy cron is removed (Wave 3) |
-| `migrations.enabled` | `false` | Renders the pre-install and pre-upgrade migration Job. Turn on only after the schema ownership handoff (design §9.1) |
-| `serviceAccount.automountToken` | `false` | Pod Identity injects its own token, so the default stays off; verified on the first deploy (ADR-0004) |
+| `migrations.enabled` | `false` | Renders the pre-install and pre-upgrade migration Job. Turn on only after the schema ownership handoff |
+| `serviceAccount.automountToken` | `false` | Pod Identity injects its own token, so the default stays off; verified on the first deploy |
 | `faultErrorRate`, `faultReadyFail` | `"0"`, `false` | Game days only |
 
 ## What `cloud: gcp` changes

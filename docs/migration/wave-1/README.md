@@ -6,7 +6,7 @@ to legacy. Procedure: platform
 [`cutover.md`](https://github.com/loriamichaelj/shiptrack-platform/blob/dev/docs/runbooks/cutover.md#wave-1-read-path-and-ui).
 
 Entry: [wave 0](../wave-0/README.md) exit, with the accepted node-image findings of
-[ADR-0021](../../ADR.md#adr-0021-accepted-node-image-findings-until-rebuilt-ami).
+[a recorded decision](../../ADR.md#adr-0021-accepted-node-image-findings-until-rebuilt-ami).
 
 | Step | `track` | Result |
 |---|---|---|

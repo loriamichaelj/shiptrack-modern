@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "shiptrack.labels" $ctx | nindent 4 }}
 spec:
-  {{- if not .Values.api.hpa.enabled }}
+  {{- if or (eq .Values.scaling.mode "fixed") (not .Values.api.hpa.enabled) }}
   replicas: {{ .Values.api.replicas }}
   {{- end }}
   strategy:
@@ -30,6 +30,10 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
       securityContext:
         {{- include "shiptrack.podSecurityContext" . | nindent 8 }}
+      {{- if .Values.spot }}
+      nodeSelector:
+        {{- include "shiptrack.spotSelector" . | nindent 8 }}
+      {{- end }}
       topologySpreadConstraints:
         {{- include "shiptrack.topologySpread" $ctx | nindent 8 }}
       containers:
@@ -45,12 +49,21 @@ spec:
           env:
             {{- include "shiptrack.commonEnv" . | nindent 12 }}
             {{- include "shiptrack.dbEnv" (dict "root" . "pool" .Values.api.pool) | nindent 12 }}
+            {{- if eq .Values.cloud "gcp" }}
+            - name: SHIPTRACK_EVENTS_TOPIC
+              value: {{ required "gcp.eventsTopic is required" .Values.gcp.eventsTopic | quote }}
+            - name: SHIPTRACK_PROOF_OF_DELIVERY_BUCKET
+              value: {{ required "gcp.proofOfDeliveryBucket is required" .Values.gcp.proofOfDeliveryBucket | quote }}
+            - name: SHIPTRACK_PROOF_OF_DELIVERY_SIGNER
+              value: {{ required "gcp.proofOfDeliverySigner is required" .Values.gcp.proofOfDeliverySigner | quote }}
+            {{- else }}
             - name: SHIPTRACK_EVENTS_QUEUE_URL
               value: {{ required "aws.eventsQueueUrl is required" .Values.aws.eventsQueueUrl | quote }}
             - name: SHIPTRACK_EVENT_BUS_NAME
               value: {{ .Values.aws.eventBusName | quote }}
             - name: SHIPTRACK_POD_BUCKET
               value: {{ required "aws.podBucket is required" .Values.aws.podBucket | quote }}
+            {{- end }}
             - name: SHIPTRACK_BASE_URL
               value: {{ .Values.baseUrl | quote }}
             - name: SHIPTRACK_FAULT_ERROR_RATE

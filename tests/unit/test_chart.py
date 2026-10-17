@@ -28,6 +28,19 @@ def render(*extra: str) -> list[dict[str, Any]]:
     return [d for d in yaml.safe_load_all(result.stdout) if d]
 
 
+def render_gcp(*extra: str) -> list[dict[str, Any]]:
+    result = subprocess.run(
+        [
+            "helm", "template", "shiptrack", str(CHART),
+            "-f", str(CHART / "ci-values-gcp.yaml"),
+            *extra,
+        ],
+        capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stderr
+    return [d for d in yaml.safe_load_all(result.stdout) if d]
+
+
 def by_kind(docs: list[dict[str, Any]], kind: str) -> dict[str, dict[str, Any]]:
     return {d["metadata"]["name"]: d for d in docs if d["kind"] == kind}
 
@@ -236,3 +249,146 @@ def test_a_digest_is_required() -> None:
     )  # fmt: skip
     assert result.returncode != 0
     assert "image/digest" in result.stderr
+
+
+# The GCP render (GCP design 5.6). The AWS render above is untouched by these switches.
+
+
+def gcp_env(name: str, docs: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    docs = docs or render_gcp()
+    spec = pod_spec(
+        by_kind(docs, "Deployment").get(name)
+        or by_kind(docs, "CronJob").get(name)
+        or by_kind(docs, "Job")[name]
+    )
+    return {e["name"]: e["value"] for e in spec["containers"][0]["env"]}
+
+
+def test_the_aws_render_is_the_default_and_names_no_gcp_object() -> None:
+    kinds = {d["kind"] for d in render()}
+    assert "PodMonitoring" not in kinds
+    assert {"TargetGroupBinding", "ScaledObject", "HorizontalPodAutoscaler"} <= kinds
+    for spec in pods().values():
+        assert "nodeSelector" not in spec
+        names = {e["name"] for e in spec["containers"][0]["env"]}
+        assert "SHIPTRACK_CLOUD" not in names
+        assert not {n for n in names if "GCP" in n or "TOPIC" in n or "SUBSCRIPTION" in n}
+
+
+def test_gcp_renders_no_aws_or_scaling_objects() -> None:
+    kinds = {d["kind"] for d in render_gcp()}
+    assert not kinds & {"TargetGroupBinding", "ScaledObject", "TriggerAuthentication"}
+    assert "HorizontalPodAutoscaler" not in kinds
+    assert "PodMonitoring" in kinds
+
+
+def test_gcp_workers_run_at_fixed_replica_counts() -> None:
+    deployments = by_kind(render_gcp(), "Deployment")
+    assert deployments["shiptrack-api"]["spec"]["replicas"] == 2
+    assert deployments["shiptrack-worker-events"]["spec"]["replicas"] == 1
+    assert deployments["shiptrack-worker-notify"]["spec"]["replicas"] == 1
+    bigger = by_kind(render_gcp("--set", "workerEvents.replicas=3"), "Deployment")
+    assert bigger["shiptrack-worker-events"]["spec"]["replicas"] == 3
+
+
+def test_gcp_pods_select_spot_capacity_when_asked() -> None:
+    docs = render_gcp()
+    specs = [
+        pod_spec(d)
+        for kind in ("Deployment", "CronJob", "Job")
+        for d in by_kind(docs, kind).values()
+    ]
+    assert len(specs) == 5
+    for spec in specs:
+        assert spec["nodeSelector"] == {"cloud.google.com/gke-spot": "true"}
+    off = render_gcp("--set", "spot=false")
+    assert all("nodeSelector" not in pod_spec(d) for d in by_kind(off, "Deployment").values())
+
+
+def test_gcp_settings_replace_the_aws_block() -> None:
+    api = gcp_env("shiptrack-api")
+    assert api["SHIPTRACK_CLOUD"] == "gcp"
+    assert api["SHIPTRACK_GCP_PROJECT"] == "example-project"
+    assert api["SHIPTRACK_DB_SECRET_NAME"] == "shiptrack-db-app"
+    assert api["SHIPTRACK_EVENTS_TOPIC"] == "shiptrack-carrier-events"
+    assert api["SHIPTRACK_PROOF_OF_DELIVERY_BUCKET"] == "example-project-proof-of-delivery"
+    assert api["SHIPTRACK_PROOF_OF_DELIVERY_SIGNER"].endswith(".iam.gserviceaccount.com")
+
+    events = gcp_env("shiptrack-worker-events")
+    assert events["SHIPTRACK_EVENTS_SUBSCRIPTION"] == "shiptrack-carrier-events-worker"
+    assert events["SHIPTRACK_NOTIFY_TOPIC"] == "shiptrack-notifications"
+
+    notify = gcp_env("shiptrack-worker-notify")
+    assert notify["SHIPTRACK_NOTIFY_SUBSCRIPTION"] == "shiptrack-notifications-worker"
+    assert not {n for n in notify if "DB_" in n}
+
+    assert gcp_env("shiptrack-sla-scan")["SHIPTRACK_DB_SECRET_NAME"] == "shiptrack-db-app"
+    migrate = gcp_env("shiptrack-migrate")
+    assert migrate["SHIPTRACK_DB_MIGRATOR_SECRET_NAME"] == "shiptrack-db-migrator"
+
+    for name in ("shiptrack-api", "shiptrack-worker-events", "shiptrack-worker-notify"):
+        names = set(gcp_env(name))
+        assert not {n for n in names if "ARN" in n or "QUEUE_URL" in n or n == "AWS_REGION"}, name
+
+
+def test_gcp_network_admits_only_the_managed_collectors() -> None:
+    policies = by_kind(render_gcp(), "NetworkPolicy")
+    assert set(policies) == {
+        "shiptrack-default-deny-ingress",
+        "shiptrack-allow-metrics-from-collectors",
+    }
+    rule = policies["shiptrack-allow-metrics-from-collectors"]["spec"]["ingress"][0]
+    assert rule["from"] == [
+        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "gmp-system"}}}
+    ]
+    assert rule["ports"] == [{"protocol": "TCP", "port": 9090}]
+
+
+def test_gcp_metrics_are_scraped_from_the_ops_port_every_minute() -> None:
+    monitoring = by_kind(render_gcp(), "PodMonitoring")["shiptrack"]["spec"]
+    assert monitoring["endpoints"] == [{"port": "ops", "path": "/metrics", "interval": "60s"}]
+    assert monitoring["selector"]["matchLabels"]["app.kubernetes.io/name"] == "shiptrack"
+
+
+def test_gcp_service_accounts_carry_no_cloud_annotation() -> None:
+    for name, account in by_kind(render_gcp(), "ServiceAccount").items():
+        assert account["automountServiceAccountToken"] is False, name
+        annotations = set(account["metadata"].get("annotations", {}))
+        assert not {a for a in annotations if "iam.gke.io" in a or "eks.amazonaws.com" in a}, name
+
+
+def helm_fails(values: str, *extra: str) -> str:
+    result = subprocess.run(
+        ["helm", "template", "x", str(CHART), "-f", str(CHART / values), *extra],
+        capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    assert result.returncode != 0
+    return result.stderr
+
+
+@pytest.mark.parametrize(
+    ("args", "needle"),
+    [
+        (["--set", "scaling.mode=keda"], "/scaling/mode"),
+        (["--set", "gcp.project="], "/gcp/project"),
+        (["--set", "gcp.proofOfDeliverySigner=someone"], "/gcp/proofOfDeliverySigner"),
+        (["--set", "gcp.eventsTopic="], "/gcp/eventsTopic"),
+        (["--set", "image.digest=latest"], "image/digest"),
+    ],
+)
+def test_the_gcp_schema_rejects_what_the_gcp_run_cannot_use(args: list[str], needle: str) -> None:
+    assert needle in helm_fails("ci-values-gcp.yaml", *args)
+
+
+def test_spot_is_refused_on_aws_and_the_cloud_must_be_known() -> None:
+    assert "/spot" in helm_fails("ci-values.yaml", "--set", "spot=true")
+    assert "/cloud" in helm_fails("ci-values.yaml", "--set", "cloud=azure")
+
+
+def test_a_gcp_render_needs_no_aws_values_and_names_no_real_project() -> None:
+    result = subprocess.run(
+        ["helm", "template", "x", str(CHART), "-f", str(CHART / "ci-values-gcp.yaml")],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    assert "example-project" in result.stdout  # placeholders only; real values arrive with --set
+    assert "<ACCOUNT_ID>" not in result.stdout

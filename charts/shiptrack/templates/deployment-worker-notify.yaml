@@ -6,7 +6,11 @@ metadata:
   labels:
     {{- include "shiptrack.labels" $ctx | nindent 4 }}
 spec:
+  {{- if eq .Values.scaling.mode "fixed" }}
+  replicas: {{ .Values.workerNotify.replicas }}
+  {{- else }}
   # KEDA owns the replica count, down to zero.
+  {{- end }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -28,6 +32,10 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.workerNotify.terminationGracePeriodSeconds }}
       securityContext:
         {{- include "shiptrack.podSecurityContext" . | nindent 8 }}
+      {{- if .Values.spot }}
+      nodeSelector:
+        {{- include "shiptrack.spotSelector" . | nindent 8 }}
+      {{- end }}
       topologySpreadConstraints:
         {{- include "shiptrack.topologySpread" $ctx | nindent 8 }}
       containers:
@@ -41,8 +49,13 @@ spec:
           # No database access: only the queue it consumes.
           env:
             {{- include "shiptrack.commonEnv" . | nindent 12 }}
+            {{- if eq .Values.cloud "gcp" }}
+            - name: SHIPTRACK_NOTIFY_SUBSCRIPTION
+              value: {{ required "gcp.notifySubscription is required" .Values.gcp.notifySubscription | quote }}
+            {{- else }}
             - name: SHIPTRACK_NOTIFY_QUEUE_URL
               value: {{ required "aws.notifyQueueUrl is required" .Values.aws.notifyQueueUrl | quote }}
+            {{- end }}
           startupProbe:
             httpGet: { path: /healthz, port: ops }
             periodSeconds: 2

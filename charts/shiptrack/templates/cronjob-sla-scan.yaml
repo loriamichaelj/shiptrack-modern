@@ -27,6 +27,10 @@ spec:
           automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
           securityContext:
             {{- include "shiptrack.podSecurityContext" . | nindent 12 }}
+          {{- if .Values.spot }}
+          nodeSelector:
+            {{- include "shiptrack.spotSelector" . | nindent 12 }}
+          {{- end }}
           containers:
             - name: sla-scan
               image: {{ include "shiptrack.image" . | quote }}

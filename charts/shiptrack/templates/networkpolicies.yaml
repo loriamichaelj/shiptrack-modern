@@ -1,4 +1,36 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if eq .Values.cloud "gcp" }}
+# Default deny for ingress. Egress is open (GCP design 7.4). With no Gateway, nothing outside the
+# cluster reaches the api; operators use kubectl port-forward.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shiptrack-default-deny-ingress
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+# The managed Prometheus collectors run in gmp-system and scrape the ops port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shiptrack-allow-metrics-from-collectors
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gmp-system
+      ports:
+        - protocol: TCP
+          port: 9090
+{{- else }}
 # Default deny for ingress. Egress is open: the VPC CNI has no FQDN egress policy (design 7.4).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -47,4 +79,5 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
+{{- end }}
 {{- end }}

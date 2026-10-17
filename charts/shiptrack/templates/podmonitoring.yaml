@@ -1,0 +1,18 @@
+{{- if eq .Values.cloud "gcp" }}
+# Managed Service for Prometheus scrapes the ops port of every ShipTrack pod (ADR-0014 in the GCP repository).
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: shiptrack
+  labels:
+    {{- include "shiptrack.labels" (dict "root" . "component" "monitoring") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shiptrack
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: ops
+      path: /metrics
+      interval: 60s
+{{- end }}

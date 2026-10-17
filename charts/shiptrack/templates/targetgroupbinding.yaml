@@ -1,3 +1,4 @@
+{{- if eq .Values.cloud "aws" }}
 apiVersion: elbv2.k8s.aws/v1beta1
 kind: TargetGroupBinding
 metadata:
@@ -18,3 +19,4 @@ spec:
         ports:
           - protocol: TCP
             port: 8000
+{{- end }}

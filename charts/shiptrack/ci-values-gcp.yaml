@@ -1,0 +1,28 @@
+# Stub values for rendering the chart for GCP: helm lint, helm template, and kubeconform. They are
+# placeholders: no real project, bucket, or service account appears here.
+cloud: gcp
+
+image:
+  repository: registry.example.test/shiptrack/app
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+baseUrl: http://shiptrack.example.test
+
+spot: true
+
+scaling:
+  mode: fixed
+
+gcp:
+  project: example-project
+  dbSecretName: shiptrack-db-app
+  dbMigratorSecretName: shiptrack-db-migrator
+  eventsTopic: shiptrack-carrier-events
+  eventsSubscription: shiptrack-carrier-events-worker
+  notifyTopic: shiptrack-notifications
+  notifySubscription: shiptrack-notifications-worker
+  proofOfDeliveryBucket: example-project-proof-of-delivery
+  proofOfDeliverySigner: shiptrack-proof-of-delivery@example-project.iam.gserviceaccount.com
+
+migrations:
+  enabled: true

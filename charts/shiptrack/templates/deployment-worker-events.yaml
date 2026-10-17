@@ -6,7 +6,11 @@ metadata:
   labels:
     {{- include "shiptrack.labels" $ctx | nindent 4 }}
 spec:
+  {{- if eq .Values.scaling.mode "fixed" }}
+  replicas: {{ .Values.workerEvents.replicas }}
+  {{- else }}
   # KEDA owns the replica count from the queue depth.
+  {{- end }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -28,6 +32,10 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.workerEvents.terminationGracePeriodSeconds }}
       securityContext:
         {{- include "shiptrack.podSecurityContext" . | nindent 8 }}
+      {{- if .Values.spot }}
+      nodeSelector:
+        {{- include "shiptrack.spotSelector" . | nindent 8 }}
+      {{- end }}
       topologySpreadConstraints:
         {{- include "shiptrack.topologySpread" $ctx | nindent 8 }}
       containers:
@@ -41,10 +49,17 @@ spec:
           env:
             {{- include "shiptrack.commonEnv" . | nindent 12 }}
             {{- include "shiptrack.dbEnv" (dict "root" . "pool" .Values.workerEvents.pool) | nindent 12 }}
+            {{- if eq .Values.cloud "gcp" }}
+            - name: SHIPTRACK_EVENTS_SUBSCRIPTION
+              value: {{ required "gcp.eventsSubscription is required" .Values.gcp.eventsSubscription | quote }}
+            - name: SHIPTRACK_NOTIFY_TOPIC
+              value: {{ required "gcp.notifyTopic is required" .Values.gcp.notifyTopic | quote }}
+            {{- else }}
             - name: SHIPTRACK_EVENTS_QUEUE_URL
               value: {{ required "aws.eventsQueueUrl is required" .Values.aws.eventsQueueUrl | quote }}
             - name: SHIPTRACK_EVENT_BUS_NAME
               value: {{ .Values.aws.eventBusName | quote }}
+            {{- end }}
           startupProbe:
             httpGet: { path: /healthz, port: ops }
             periodSeconds: 2

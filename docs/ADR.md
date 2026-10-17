@@ -35,6 +35,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0029 | `recent-shipments-come-from-the-server` | Accepted |
 | 0030 | `proof-of-delivery-is-not-a-pod` | Accepted |
 | 0031 | `python-3-14` | Accepted |
+| 0032 | `cloud-seam` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -421,3 +422,20 @@ Conditions:
 The 3.14 base image's pip vendors copies of msgpack, urllib3, and pkg_resources, and the image scan reported four fixable HIGH findings in them. The runtime stage has no use for an installer, so it removes pip; the app's own environment is untouched and the scan is clean.
 
 **Consequences:** The image runs a different interpreter minor than legacy, which the API contract does not depend on. A dependency that does not support 3.14 would block an update, and the tests would show it. Base image updates for Python now arrive as Dependabot pull requests that change the pin only when the project's versions are moved with them, as here.
+
+## ADR-0032: cloud-seam
+
+**Status:** Accepted
+
+**Context:** The same image digest runs on AWS and, next, on GCP (GCP repository ADR-0001), and the Azure target will join it. The application reached the cloud through `boto3` in five places: the secret cache, the SQS publisher and consumer, the EventBridge announcement, and the S3 store. The cloud SDKs must not leak into the workers, the routes, or the tests, or every new cloud would rewrite them.
+
+**Decision:** `shiptrack.ports` defines what the application needs from a cloud: a secret source, an event publisher, a message queue, a notifier, and an object store. `SHIPTRACK_CLOUD` (`aws`, the default, or `gcp`) selects an implementation of each in `shiptrack.cloud`, the only module that names them. A cloud's SDK is imported when its branch runs, so a process loads one cloud's clients. The AWS classes keep their code and move behind the ports; the GCP classes live in `shiptrack.gcp`. Settings are checked per cloud, at the point a command needs them, so an unset GCP variable is an error only on GCP. A new cloud adds a literal, a block of settings, a package, and one branch per factory.
+
+Where the clouds differ, the port states the common behavior and the implementation hides the rest:
+- A queue message that fails is released. SQS leaves it for the visibility timeout; Pub/Sub nacks it with a zero acknowledge deadline. Both dead-letter after five attempts, set on the queue.
+- A queue says how long the worker waits after an empty receive: none for SQS, whose long poll is the wait, and one second for Pub/Sub. The Pub/Sub pull is bounded to the poll's wait, because the emulator holds an empty pull for about 29 seconds and a Spot pod's termination grace period is short.
+- The notification keeps the EventBridge envelope (`detail-type`, `detail`) on every cloud, so the notify worker is the same code. On Pub/Sub the publisher also sets the `detail_type` attribute that the subscription filter reads.
+- A store says which URIs it serves, so a `gs://` row is served on GCP and an `s3://` row is refused there with the existing 500. Proof-of-delivery objects are `pod/...` on AWS, which stored data depends on (ADR-0030), and `proof-of-delivery/...` on GCP.
+- On GCP, log records also carry `severity` and `message`, which Cloud Logging reads; every other field is unchanged.
+
+**Consequences:** AWS behavior is unchanged: the AWS tests assert the same calls, with their construction moved to the queue and notifier classes, and one log event is renamed (`put_events_failed` is `notification_send_failed`, and nothing reads it). The image gains the Google client libraries, about 15 MB compressed (77 MB to 92 MB; the target is 200 MB). The GCP ports are tested with fakes and, in `tests/integration/test_gcp_emulators.py`, against the Pub/Sub emulator and a fake Cloud Storage server that CI and `compose --profile gcp` start by digest. The emulators cover filters, dead-lettering, and a real resumable upload; Secret Manager and the IAM signing call behind a signed URL have no emulator, so the first GCP deployment is what proves them. The Azure target adds its own literal and package without changing these ports.

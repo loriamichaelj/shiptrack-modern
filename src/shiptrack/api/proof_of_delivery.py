@@ -17,8 +17,8 @@ from shiptrack.api.errors import ApiError, not_found
 from shiptrack.db.models import ProofOfDeliveryDocument
 from shiptrack.db.session import get_session
 from shiptrack.domain.models import ProofOfDeliveryOut
-from shiptrack.storage import s3
-from shiptrack.storage.s3 import ProofOfDeliveryStore
+from shiptrack.ports import ObjectStore, PayloadTooLargeError
+from shiptrack.storage.common import is_legacy_file_uri
 
 log = structlog.get_logger("shiptrack.proof_of_delivery")
 
@@ -45,13 +45,13 @@ def upload_proof_of_delivery(
             415, "UNSUPPORTED_MEDIA_TYPE", "Only application/pdf, image/png, image/jpeg allowed"
         )
 
-    store: ProofOfDeliveryStore = request.app.state.proof_of_delivery_store
+    store: ObjectStore = request.app.state.proof_of_delivery_store
     document_id = uuid.uuid4()
     try:
         stored = store.save(
             shipment.id, document_id, file.file, content_type, MAX_PROOF_OF_DELIVERY_BYTES
         )
-    except s3.PayloadTooLargeError as exc:
+    except PayloadTooLargeError as exc:
         metrics.PROOF_OF_DELIVERY_UPLOADS.labels(result="rejected").inc()
         raise ApiError(
             413, "PAYLOAD_TOO_LARGE", "Proof-of-delivery files are limited to 10 MiB"
@@ -101,13 +101,13 @@ def download_proof_of_delivery(
     if document is None:
         raise not_found("Document not found")
 
-    location = s3.split_uri(document.storage_uri)
+    store: ObjectStore = request.app.state.proof_of_delivery_store
+    location = store.locate(document.storage_uri)
     if location is not None:
-        store: ProofOfDeliveryStore = request.app.state.proof_of_delivery_store
         url = store.presigned_url(location[0], location[1], document.content_type)
         return RedirectResponse(url, status_code=302)
 
-    if s3.is_legacy_file_uri(document.storage_uri):
+    if is_legacy_file_uri(document.storage_uri):
         # Uploaded to a legacy host and not yet copied to S3 by the sync (cutover gate G-POD).
         metrics.PROOF_OF_DELIVERY_NOT_MIGRATED.inc()
         log.warning(

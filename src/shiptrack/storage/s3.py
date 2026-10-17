@@ -7,33 +7,26 @@ redirect to a short-lived presigned URL, so the bytes never pass through the API
 
 from __future__ import annotations
 
-import hashlib
 import uuid
-from dataclasses import dataclass
 from typing import Any, BinaryIO
-from urllib.parse import urlparse
 
 import boto3
 from botocore.config import Config
 
+from shiptrack.ports import PayloadTooLargeError, StoredObject
+from shiptrack.storage import common
+from shiptrack.storage.common import CountingReader, is_legacy_file_uri
+
+__all__ = [
+    "PayloadTooLargeError",
+    "ProofOfDeliveryStore",
+    "StoredObject",
+    "is_legacy_file_uri",
+    "object_key",
+    "split_uri",
+]
+
 PRESIGNED_TTL_SECONDS = 300
-CHUNK_SIZE = 64 * 1024
-
-
-class PayloadTooLargeError(Exception):
-    pass
-
-
-@dataclass(frozen=True)
-class StoredObject:
-    bucket: str
-    key: str
-    size_bytes: int
-    sha256: str
-
-    @property
-    def uri(self) -> str:
-        return f"s3://{self.bucket}/{self.key}"
 
 
 def object_key(shipment_id: uuid.UUID, document_id: uuid.UUID) -> str:
@@ -42,36 +35,7 @@ def object_key(shipment_id: uuid.UUID, document_id: uuid.UUID) -> str:
 
 def split_uri(uri: str) -> tuple[str, str] | None:
     """(bucket, key) for an s3:// URI, or None for any other scheme."""
-    parsed = urlparse(uri)
-    if parsed.scheme != "s3" or not parsed.netloc:
-        return None
-    return parsed.netloc, parsed.path.lstrip("/")
-
-
-def is_legacy_file_uri(uri: str) -> bool:
-    return urlparse(uri).scheme == "file"
-
-
-class _CountingReader:
-    """Hash and count what is read, and stop as soon as the limit is passed."""
-
-    def __init__(self, stream: BinaryIO, max_bytes: int) -> None:
-        self._stream = stream
-        self._max_bytes = max_bytes
-        self._digest = hashlib.sha256()
-        self.size = 0
-
-    def read(self, size: int = -1) -> bytes:
-        chunk = self._stream.read(CHUNK_SIZE if size is None or size < 0 else size)
-        self.size += len(chunk)
-        if self.size > self._max_bytes:
-            raise PayloadTooLargeError
-        self._digest.update(chunk)
-        return chunk
-
-    @property
-    def sha256(self) -> str:
-        return self._digest.hexdigest()
+    return common.split_uri(uri, "s3")
 
 
 class ProofOfDeliveryStore:
@@ -93,7 +57,7 @@ class ProofOfDeliveryStore:
     ) -> StoredObject:
         """Stream `stream` to S3 while hashing it; refuse anything over `max_bytes`."""
         key = object_key(shipment_id, document_id)
-        reader = _CountingReader(stream, max_bytes)
+        reader = CountingReader(stream, max_bytes)
         # upload_fileobj aborts a multipart upload itself if the reader raises.
         self._client.upload_fileobj(
             reader, self.bucket, key, ExtraArgs={"ContentType": content_type}
@@ -102,6 +66,9 @@ class ProofOfDeliveryStore:
 
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self.bucket, Key=key)
+
+    def locate(self, uri: str) -> tuple[str, str] | None:
+        return split_uri(uri)
 
     def presigned_url(self, bucket: str, key: str, content_type: str) -> str:
         return str(

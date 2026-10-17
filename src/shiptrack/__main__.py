@@ -10,12 +10,17 @@ from types import FrameType
 import structlog
 import uvicorn
 
+from shiptrack.cloud import (
+    build_events_queue,
+    build_notifier,
+    build_notify_queue,
+    build_secret_cache,
+)
 from shiptrack.config import ConfigError, Settings, load_settings
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.events.worker import EventWorker, NotifyWorker, QueueWorker
 from shiptrack.logconfig import configure_logging
 from shiptrack.ops import start_ops_server
-from shiptrack.secrets import SecretCache
 
 log = structlog.get_logger("shiptrack")
 
@@ -38,7 +43,7 @@ class DrainingServer(uvicorn.Server):
 
 
 def serve_api(settings: Settings) -> int:
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.cloud)
     start_ops_server(OPS_PORT)
     config = uvicorn.Config(
         "shiptrack.main:app",
@@ -67,15 +72,12 @@ def run_worker(worker: QueueWorker) -> int:
 
 
 def serve_worker_events(settings: Settings) -> int:
-    configure_logging(settings.log_level)
-    engine = create_db_engine(
-        settings, settings.require_db_secret(), SecretCache(settings.aws_region)
-    )
+    configure_logging(settings.log_level, settings.cloud)
+    engine = create_db_engine(settings, settings.require_db_secret(), build_secret_cache(settings))
     worker = EventWorker(
-        settings.require_events_queue(),
+        build_events_queue(settings),
         create_session_factory(engine),
-        bus_name=settings.event_bus_name,
-        region=settings.aws_region,
+        notifier=build_notifier(settings),
     )
     try:
         return run_worker(worker)
@@ -84,13 +86,13 @@ def serve_worker_events(settings: Settings) -> int:
 
 
 def serve_worker_notify(settings: Settings) -> int:
-    configure_logging(settings.log_level)
-    return run_worker(NotifyWorker(settings.require_notify_queue(), settings.aws_region))
+    configure_logging(settings.log_level, settings.cloud)
+    return run_worker(NotifyWorker(build_notify_queue(settings)))
 
 
 def migrate(settings: Settings) -> int:
     """Run the Alembic migrations as shiptrack_migrator, and only when ownership allows it."""
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.cloud)
     if not settings.migrations_enabled:
         log.error(
             "migrations_disabled", hint="set SHIPTRACK_MIGRATIONS_ENABLED=true after the handoff"

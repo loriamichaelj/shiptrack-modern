@@ -487,3 +487,13 @@ The job has `continue-on-error: true`. A failure shows as a failed job with an e
 **Decision:** The `plan` job does not run for Dependabot (`github.actor != 'dependabot[bot]'`), and a skipped job counts as passing. Dependabot is not given AWS credentials. A provider bump is checked by the `iac` job (format, validate, tflint, Checkov, and Trivy), and it is planned by `apply-terraform`, which makes a fresh plan after the `dev` environment's approval before it applies anything.
 
 **Consequences:** A Dependabot Terraform pull request shows no plan comment, so a reviewer reads the provider's changelog and relies on the plan at apply time. Nothing about AWS access widens. If a plan before the merge is wanted, a person can push the same change from their own branch, where the secrets and the role are available.
+
+## ADR-0037: refetch-the-secret-when-a-login-is-rejected
+
+**Status:** Accepted
+
+**Context:** The engine's connection function is meant to fetch the database secret again, once, when the server turns the login down, so a rotated password reaches a running pod without a restart. It caught only `psycopg.errors.InvalidPassword` and `InvalidAuthorizationSpecification`. A rejection while connecting is not raised as those classes: libpq reports the FATAL message and no result, so psycopg raises a plain `OperationalError` ("connection failed ... FATAL: password authentication failed for user ..."). The handler never ran. On GCP, a rotation test left the api returning 500 and 503 on every request that needed a new connection until its pods were restarted, and `db_auth_failed_refetching_secret` appeared in no log. The code is shared, so AWS had the same defect: a Secrets Manager rotation would not have reached a running pod either.
+
+**Decision:** The connection function catches `OperationalError` and treats it as a rejected login when its SQLSTATE is 28P01 or 28000, or when its message says the password authentication failed. It then drops the cached secret, fetches it, and connects once more. Any other `OperationalError` (a database that is down, a timeout) is raised as before and does not fetch the secret. A second rejection is raised and is not retried again. Unit tests cover each case.
+
+**Consequences:** A rotated password reaches running pods on their next new connection, on every cloud. This changes AWS behavior in the direction the code always claimed: a pod that holds a stale password recovers by itself instead of failing until it restarts. A rotation still has a gap between the new secret and the database roles taking it (on GCP, `db-init`), during which a pod that starts cannot log in. The API contract is unchanged.

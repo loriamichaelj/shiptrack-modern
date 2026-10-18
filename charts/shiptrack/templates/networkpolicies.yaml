@@ -12,7 +12,8 @@ spec:
   podSelector: {}
   policyTypes: ["Ingress"]
 ---
-# The managed Prometheus collectors run in gmp-system and scrape the ops port.
+# The managed Prometheus collectors scrape the ops port. GKE Autopilot runs them in gke-gmp-system and a
+# cluster with a self-deployed operator in gmp-system, so both namespaces are admitted.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -25,8 +26,10 @@ spec:
   ingress:
     - from:
         - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: gmp-system
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: ["gmp-system", "gke-gmp-system"]
       ports:
         - protocol: TCP
           port: 9090

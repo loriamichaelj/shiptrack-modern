@@ -338,8 +338,19 @@ def test_gcp_network_admits_only_the_managed_collectors() -> None:
         "shiptrack-allow-metrics-from-collectors",
     }
     rule = policies["shiptrack-allow-metrics-from-collectors"]["spec"]["ingress"][0]
+    # Autopilot runs the managed collectors in gke-gmp-system; a self-deployed one uses gmp-system.
     assert rule["from"] == [
-        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "gmp-system"}}}
+        {
+            "namespaceSelector": {
+                "matchExpressions": [
+                    {
+                        "key": "kubernetes.io/metadata.name",
+                        "operator": "In",
+                        "values": ["gmp-system", "gke-gmp-system"],
+                    }
+                ]
+            }
+        }
     ]
     assert rule["ports"] == [{"protocol": "TCP", "port": 9090}]
 

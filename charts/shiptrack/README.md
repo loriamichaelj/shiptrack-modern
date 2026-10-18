@@ -36,7 +36,7 @@ not `sha256:<64 hex>`. The image is always referenced by digest.
 
 - The `TargetGroupBinding`, the KEDA objects, and the HPA are not rendered, and the pods read the `gcp` block (project, secret names, topics, subscriptions, bucket, and the signer) instead of the `aws` block.
 - A `PodMonitoring` resource has the managed Prometheus scrape port 9090 every 60 seconds.
-- The network policies admit the managed collectors in `gmp-system` to port 9090 and nothing to the api, which is reached with `kubectl port-forward`.
+- The network policies admit the managed collectors (`gke-gmp-system` on Autopilot, `gmp-system` otherwise) to port 9090 and nothing to the api, which is reached with `kubectl port-forward`.
 - Service accounts carry no annotation: the GKE workload identity binding names the Kubernetes service account.
 
 The AWS render does not change; the chart tests and the CI render keep it that way.

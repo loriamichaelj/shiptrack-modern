@@ -36,6 +36,12 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0030 | `proof-of-delivery-is-not-a-pod` | Accepted |
 | 0031 | `python-3-14` | Accepted |
 | 0032 | `cloud-seam` | Accepted |
+| 0033 | `chart-cloud-switches` | Accepted |
+| 0034 | `ghcr-publish` | Accepted |
+| 0035 | `db-init-runs-in-the-app-image` | Accepted |
+| 0036 | `no-plan-for-dependabot` | Accepted |
+| 0037 | `refetch-the-secret-when-a-login-is-rejected` | Accepted |
+| 0038 | `api-open-to-additive-change` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -48,6 +54,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Consequences:** `git log` reads as the remediation story, and any REM can be reviewed or reverted alone. The contract suite runs unchanged against both stacks. UI changes wait for Wave 2.
 
 **Amended by ADR-0016:** pull requests are squash-merged, so on `dev` the remediation story is told by pull requests and squash commit bodies rather than one commit per REM. The import commit is unaffected.
+
+**Amended by ADR-0038:** the freeze is lifted. The legacy contract is kept, and modern may add to it.
 
 ## ADR-0002: db-connection-budget
 
@@ -332,6 +340,8 @@ Conditions:
 
 **Consequences:** The two UIs now differ, so opening both shows modern's progress against legacy's original. The contract suite no longer asserts parity; it still asserts that `/ui/` serves the shell and its assets with the right headers on whichever stack it addresses. A browser sticky to legacy sees legacy's UI and one on modern sees modern's, which is the intent while legacy is only a fallback. The UI creates test data when someone uses the create, event, and proof-of-delivery forms; it is not a read-only view.
 
+**Amended by ADR-0038:** the UI may use the endpoints, fields, and headers modern adds.
+
 ## ADR-0025: synthetic-traffic-from-the-browser
 
 **Status:** Accepted
@@ -497,3 +507,20 @@ The job has `continue-on-error: true`. A failure shows as a failed job with an e
 **Decision:** The connection function catches `OperationalError` and treats it as a rejected login when its SQLSTATE is 28P01 or 28000, or when its message says the password authentication failed. It then drops the cached secret, fetches it, and connects once more. Any other `OperationalError` (a database that is down, a timeout) is raised as before and does not fetch the secret. A second rejection is raised and is not retried again. Unit tests cover each case.
 
 **Consequences:** A rotated password reaches running pods on their next new connection, on every cloud. This changes AWS behavior in the direction the code always claimed: a pod that holds a stale password recovers by itself instead of failing until it restarts. A rotation still has a gap between the new secret and the database roles taking it (on GCP, `db-init`), during which a pod that starts cannot log in. The API contract is unchanged.
+
+## ADR-0038: api-open-to-additive-change
+
+**Status:** Accepted
+
+**Context:** ADR-0001 froze the API contract so that both stacks behaved the same while the weights moved, and ADR-0024 kept the new UI on the existing API. The cutover is complete. Modern serves every request on AWS, and the same image serves GCP. Legacy is the fallback on the preview port. The owner wants to add features and UI changes to modern and keep legacy as it is. The platform contract suite checks that every legacy §3.4 endpoint is exercised, and it checks the status codes and the values of the fields it reads. It does not reject endpoints, response fields, or headers it does not know.
+
+**Decision:**
+- The freeze is lifted for modern. Modern may add endpoints, response fields, optional request fields, query parameters, and response headers.
+- The legacy §3.4 behavior stays: every existing endpoint keeps its path, its status and error codes, its required request fields, and the meaning of its existing fields. The platform contract suite is not edited and must pass on every cloud modern runs on. A change that would need the suite edited is a breaking change and needs its own ADR.
+- Modern's own tests cover what is added: pytest for the API, the web tests for the UI.
+- Schema changes stay expand-only. New tables are fine, and so are new columns that are nullable or have a server default. Nothing legacy reads or writes is dropped, renamed, or made required, because legacy shares the AWS database and is the rollback target.
+- The UI may use what is added. It keeps the REM-16 CSP: no inline script or style, and same-origin images only.
+- One image serves every cloud. A feature that needs a cloud service goes behind the cloud seam (ADR-0032) and gets an implementation for each cloud it is deployed on. AWS and GCP are those clouds today, and Azure needs one before its target deploys.
+- A feature is not a remediation, so its pull request names no REM. Each feature is its own pull request.
+
+**Consequences:** Modern and legacy now differ in their APIs as well as their UIs. A rollback to legacy (`ops-rollback-cutover`) serves the legacy contract only. While it is in effect, the added endpoints and fields are gone. Data written to new tables and columns stays in the database, and legacy ignores it. The platform suite still proves the legacy contract on AWS and GCP, but it says nothing about the additions, so a release that breaks only an addition passes the deploy smoke. Amends ADR-0001 (the freeze) and ADR-0024 (the UI is built only on the existing API).

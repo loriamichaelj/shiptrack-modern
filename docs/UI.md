@@ -1,8 +1,8 @@
 # The UI
 
 Modern's UI is its own: a React single-page app that the API serves at `/ui/`. It is built
-only on the frozen API, so it adds no endpoint, field, or header, and it keeps the strict CSP: no inline
-script or style, and same-origin images only. Legacy's UI is a minimal tracking page and is not changed.
+on the API, including the endpoints and fields modern adds to the legacy contract, and it keeps the strict
+CSP: no inline script or style, and same-origin images only. Legacy's UI is a minimal tracking page and is not changed.
 
 The UI writes as well as reads. The forms and the live traffic create real shipments, events, and
 documents in the shared database; nothing in the API deletes them, and the platform's `ops-reset-data`

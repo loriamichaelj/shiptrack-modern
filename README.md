@@ -15,7 +15,7 @@ request and in the squash commit that lands it.
 - Detailed diagrams of all three repositories: [`ARCHITECTURE.md` in shiptrack-platform](https://github.com/loriamichaelj/shiptrack-platform/blob/dev/docs/ARCHITECTURE.md)
 - The UI, page by page: [`docs/UI.md`](docs/UI.md). Watching traffic in Grafana: [`docs/GRAFANA.md`](docs/GRAFANA.md)
 
-The API contract is frozen: it behaves exactly as the legacy design says, plus a short list of additions.
+The API keeps the legacy contract exactly as the legacy design says, and modern adds to it: new endpoints and fields, never a change to an existing one.
 The UI in `web/` is modern's own; legacy keeps its original minimal UI.
 
 ## Migration strategy
@@ -40,7 +40,7 @@ routing hides (`AP-05`), and an SLA scan that runs on every host (`AP-09`).
 | R | What AWS means by it | In ShipTrack |
 |---|---|---|
 | Retire | Decommission or archive the application | The source stack's scheduled jobs (the SLA scan and the proof-of-delivery sync) are removed in Wave 3, and its local-disk proof-of-delivery store is retired by the move to S3. The stack as a whole is not retired: it stays as the fallback |
-| Retain | Keep the application in the source environment | The source stack keeps running behind the preview port as the fallback. The shared PostgreSQL database and its schema, the frozen API contract, and the source stack's original minimal UI are kept as they are |
+| Retain | Keep the application in the source environment | The source stack keeps running behind the preview port as the fallback. The shared PostgreSQL database (modern's schema changes only add to it), the source stack's API contract, and its original minimal UI are kept as they are |
 | Rehost | Lift and shift, with no changes | Not used for the application, for the reason above. The source stack is itself the baseline that the assessment measures |
 | Relocate | Move to the cloud version of the same platform, or to another VPC, Region, or account | Not used. Both stacks run in one account and one VPC and share the platform's ALB and database; the cutover moves traffic, not servers |
 | Repurchase | Replace the application with a different product, usually SaaS | Not used for the application. ShipTrack is built, not bought |
@@ -212,7 +212,7 @@ ingestion, observability, and delivery) are in
 
 ## The UI
 
-Modern's UI is a React single-page app that the API serves at `/ui/`, built only on the frozen API under a
+Modern's UI is a React single-page app that the API serves at `/ui/`, built on the API under a
 strict CSP. Its pages are Live traffic (a synthetic traffic engine and a board of shipments by status),
 Track, Browse, New shipment, Shipment (events and proof of delivery), and System. It writes real data to
 the shared database; the platform's `ops-reset-data` clears it. Each page is described in

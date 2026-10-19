@@ -37,7 +37,7 @@ To see what a remediation changed on `dev`, diff the import commit against the c
 
 ```sh
 git diff --stat 4f23aea HEAD -- src migrations
-git diff --stat 4f23aea HEAD -- web      # empty until Wave 2 completes: the UI source is frozen
+git diff --stat 4f23aea HEAD -- web      # modern's own UI, changed since Wave 2
 ```
 
 The requirements files are replaced by `pyproject.toml` and `uv.lock` in the tooling change that

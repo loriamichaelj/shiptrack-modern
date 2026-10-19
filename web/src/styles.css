@@ -24,8 +24,9 @@
   line-height: 1.5;
 }
 
+/* The theme follows the system unless the header's switch sets data-theme on <html> (theme.ts). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0e131b;
     --surface: #161d28;
     --fg: #e7ebf2;
@@ -46,6 +47,33 @@
     --s-delivered: #4ade80;
     --s-exception: #f87171;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e131b;
+  --surface: #161d28;
+  --fg: #e7ebf2;
+  --muted: #9aa6b8;
+  --line: #2a3442;
+  --accent: #8ea2ff;
+  --accent-fg: #0b1020;
+  --accent-soft: #232c4d;
+  --error: #ff8a80;
+  --ok: #5fd68a;
+  --badge-bg: #202938;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 22px rgb(0 0 0 / 28%);
+
+  --s-created: #94a3b8;
+  --s-picked-up: #38bdf8;
+  --s-in-transit: #8b8bff;
+  --s-out-for-delivery: #fbbf24;
+  --s-delivered: #4ade80;
+  --s-exception: #f87171;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -398,6 +426,32 @@ button.ghost {
 }
 
 .app-header button.ghost[aria-pressed="true"] {
+  color: #1b2559;
+  background: #ffffff;
+}
+
+.theme-switch {
+  display: inline-flex;
+  padding: 0.15rem;
+  border: 1px solid rgb(255 255 255 / 40%);
+  border-radius: 999px;
+}
+
+.theme-switch button {
+  display: grid;
+  place-items: center;
+  padding: 0.3rem;
+  color: rgb(255 255 255 / 85%);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+}
+
+.theme-switch button:hover {
+  background: rgb(255 255 255 / 14%);
+}
+
+.theme-switch button[aria-pressed="true"] {
   color: #1b2559;
   background: #ffffff;
 }

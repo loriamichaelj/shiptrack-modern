@@ -218,22 +218,6 @@ Track, Browse, New shipment, Shipment (events and proof of delivery), and System
 the shared database; the platform's `ops-reset-data` clears it. Each page is described in
 [`docs/UI.md`](docs/UI.md).
 
-![The Live page: a board of shipments by status, each column with its count and tracking-number chips](docs/images/ui-live-board.png)
-
-![The Live page's controls and six tiles: requests per second, success, latency p50 and p95, shipments created, events applied and sent, and apply lag](docs/images/ui-live-controls.png)
-
-![The Live page's throughput and latency charts, the shipments-by-status donut, and the live feed of accepted and applied events](docs/images/ui-live-charts.png)
-
-![The Track page: a tracking number field, the five newest shipments, and cards linking to Live, Browse, New shipment, and System](docs/images/ui-track.png)
-
-![The Browse page: totals, a status donut, and shipments by carrier](docs/images/ui-browse.png)
-
-![The Browse page's filter bar and table of shipments with status, carrier, route, promised, and created](docs/images/ui-browse-table.png)
-
-![The New shipment form: carrier code, origin, destination, and promised delivery](docs/images/ui-new-shipment.png)
-
-![The System page: readiness, stack, latency, call totals, an API explorer, and the API activity panel listing recent calls](docs/images/ui-system.png)
-
 Grafana opens on the ALB's port 3000 from the platform's preview addresses and shows five boards over
 the managed Prometheus: see [`docs/GRAFANA.md`](docs/GRAFANA.md).
 

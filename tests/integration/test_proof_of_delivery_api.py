@@ -162,6 +162,55 @@ def test_document_belongs_to_its_shipment(client: TestClient, make_shipment: Mak
     assert client.get(f"/api/v1/shipments/{second}/pod/{document_id}").status_code == 404
 
 
+def test_the_list_has_every_document_of_the_shipment_newest_first(
+    client: TestClient, make_shipment: MakeShipment
+) -> None:
+    sid, other = make_shipment()["id"], make_shipment()["id"]
+    first = upload(client, sid).json()
+    second = upload(client, sid, b"%PDF-1.7 pod", "application/pdf").json()
+    upload(client, other)
+
+    response = client.get(f"/api/v1/shipments/{sid}/pod")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["document_id"] for item in items] == [
+        second["document_id"],
+        first["document_id"],
+    ]
+    assert items[1] == {**first, "available": True}
+    assert items[0]["content_type"] == "application/pdf"
+
+
+def test_the_list_is_empty_for_a_shipment_with_no_documents(
+    client: TestClient, make_shipment: MakeShipment
+) -> None:
+    sid = make_shipment()["id"]
+    response = client.get(f"/api/v1/shipments/{sid}/pod")
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+
+
+def test_the_list_answers_404_for_an_unknown_shipment(client: TestClient) -> None:
+    for shipment_id in (str(uuid.uuid4()), "nope"):
+        response = client.get(f"/api/v1/shipments/{shipment_id}/pod")
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_the_list_marks_a_document_still_on_a_legacy_disk_unavailable(
+    client: TestClient, make_shipment: MakeShipment, engine: Engine
+) -> None:
+    sid = make_shipment()["id"]
+    document_id = upload(client, sid).json()["document_id"]
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE shiptrack.pod_documents SET storage_uri = :uri"),
+            {"uri": f"file:///var/lib/shiptrack/pod/{sid}/{document_id}"},
+        )
+    items = client.get(f"/api/v1/shipments/{sid}/pod").json()["items"]
+    assert [(item["document_id"], item["available"]) for item in items] == [(document_id, False)]
+
+
 def test_storage_uri_is_an_s3_uri(
     client: TestClient, settings: Settings, make_shipment: MakeShipment, engine: Engine
 ) -> None:

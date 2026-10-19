@@ -111,3 +111,13 @@ class ProofOfDeliveryOut(BaseModel):
     size_bytes: int
     sha256: str
     uploaded_at: UtcDatetime
+
+
+class ProofOfDeliveryListItem(ProofOfDeliveryOut):
+    # False for a document uploaded to a legacy host and not yet copied to object storage: its
+    # download answers 404 until the copy lands (ADR-0040).
+    available: bool
+
+
+class ProofOfDeliveryList(BaseModel):
+    items: list[ProofOfDeliveryListItem]

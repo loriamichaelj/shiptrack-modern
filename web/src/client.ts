@@ -31,6 +31,15 @@ export interface ProofOfDeliveryDocument {
   uploaded_at: string;
 }
 
+/** A document in the list (ADR-0040). `available` is false while it is still on a legacy host. */
+export interface ListedProofOfDelivery extends ProofOfDeliveryDocument {
+  available: boolean;
+}
+
+export interface ProofOfDeliveryList {
+  items: ListedProofOfDelivery[];
+}
+
 export type EventType = Exclude<ShipmentStatus, "CREATED">;
 export const EVENT_TYPES: EventType[] = [
   "PICKED_UP",
@@ -97,6 +106,7 @@ const isShipment = (v: unknown): v is Shipment =>
   isRecord(v) && typeof v.id === "string" && typeof v.tracking_number === "string";
 const isPage = (v: unknown): v is ShipmentPage => isRecord(v) && Array.isArray(v.items);
 const isProofOfDelivery = (v: unknown): v is ProofOfDeliveryDocument => isRecord(v) && typeof v.document_id === "string";
+const isProofOfDeliveryList = (v: unknown): v is ProofOfDeliveryList => isRecord(v) && Array.isArray(v.items);
 const isAccepted = (v: unknown): v is { accepted: boolean; idempotency_key: string } =>
   isRecord(v) && typeof v.accepted === "boolean";
 const isReady = (v: unknown): v is { ready: boolean; reason: string | null } =>
@@ -170,6 +180,13 @@ export function uploadProofOfDelivery(shipmentId: string, file: File) {
     isProofOfDelivery,
   );
 }
+
+/** The newest documents of a shipment, newest first; the API returns at most PROOF_OF_DELIVERY_LIST_LIMIT. */
+export function listProofsOfDelivery(shipmentId: string, signal?: AbortSignal) {
+  return run(`/api/v1/shipments/${encodeURIComponent(shipmentId)}/pod`, { signal, headers: json }, isProofOfDeliveryList);
+}
+
+export const PROOF_OF_DELIVERY_LIST_LIMIT = 100;
 
 export function proofOfDeliveryUrl(shipmentId: string, documentId: string): string {
   return `/api/v1/shipments/${encodeURIComponent(shipmentId)}/pod/${encodeURIComponent(documentId)}`;

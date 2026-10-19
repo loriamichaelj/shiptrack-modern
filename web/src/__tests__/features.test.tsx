@@ -8,7 +8,7 @@ import { RuntimeProvider } from "../live/runtime";
 import { ShipmentStore } from "../live/store";
 import { ShipmentsPage } from "../pages/ShipmentsPage";
 import { StackProvider } from "../stack";
-import { jsonResponse, renderApp, stubFetch, trackView, TRACKING_NUMBER } from "./helpers";
+import { jsonResponse, renderApp, routedFetch, stubFetch, trackView, TRACKING_NUMBER } from "./helpers";
 
 const SID = "11111111-1111-1111-1111-111111111111";
 
@@ -208,16 +208,52 @@ describe("shipment page", () => {
     expect(fetchMock.mock.calls.length).toBe(calls);
   });
 
-  it("uploads a document and offers it for opening", async () => {
+  it("uploads a document, reads the server's list again, and offers it for opening", async () => {
     const proof = { document_id: "44444444-4444-4444-4444-44444444444b", shipment_id: SID, content_type: "application/pdf", size_bytes: 2048, sha256: "a".repeat(64), uploaded_at: "2026-10-11T12:00:00Z" };
-    stubFetch(jsonResponse(shipment()), jsonResponse(trackView()), jsonResponse(proof, { status: 201 }));
+    const fetchMock = stubFetch(
+      jsonResponse(shipment()),
+      jsonResponse(trackView()),
+      jsonResponse({ items: [] }),
+      jsonResponse(proof, { status: 201 }),
+      jsonResponse({ items: [{ ...proof, available: true }] }),
+    );
     const user = userEvent.setup();
     renderApp(`/shipments/${SID}`);
     await screen.findByRole("heading", { name: TRACKING_NUMBER });
+    expect(await screen.findByText("No documents yet.")).toBeVisible();
     await user.upload(screen.getByLabelText("Document"), new File(["%PDF"], "proof.pdf", { type: "application/pdf" }));
     await user.click(screen.getByRole("button", { name: /Upload/ }));
     const link = await screen.findByRole("link", { name: "Open document" });
     expect(link).toHaveAttribute("href", `/api/v1/shipments/${SID}/pod/${proof.document_id}`);
+    expect(screen.getByText("Documents (1)")).toBeVisible();
+    expect(String(lastCall(fetchMock)[0])).toBe(`/api/v1/shipments/${SID}/pod`);
+  });
+
+  it("lists every document the server has, and does not offer one still on a legacy host", async () => {
+    const doc = (n: number, available: boolean, contentType = "image/png") => ({
+      document_id: `4444444${n}-4444-4444-4444-44444444444b`, shipment_id: SID, content_type: contentType,
+      size_bytes: 4096, sha256: "b".repeat(64), uploaded_at: "2026-10-11T12:00:00Z", available,
+    });
+    routedFetch([
+      ["/pod", jsonResponse({ items: [doc(1, true), doc(2, false), doc(3, true, "application/pdf")] })],
+      ["/track/", jsonResponse(trackView())],
+      [`/shipments/${SID}`, jsonResponse(shipment())],
+    ]);
+    renderApp(`/shipments/${SID}`);
+    expect(await screen.findByText("Documents (3)")).toBeVisible();
+    expect(screen.getAllByRole("link", { name: "Open document" })).toHaveLength(2);
+    expect(screen.getAllByRole("img", { name: "Proof of delivery" })).toHaveLength(1);
+    expect(screen.getByText(/Still on a legacy host/)).toBeVisible();
+  });
+
+  it("says so when the documents cannot be listed", async () => {
+    routedFetch([
+      ["/pod", jsonResponse({ error: { code: "INTERNAL", message: "Internal server error", request_id: null } }, { status: 500 })],
+      ["/track/", jsonResponse(trackView())],
+      [`/shipments/${SID}`, jsonResponse(shipment())],
+    ]);
+    renderApp(`/shipments/${SID}`);
+    expect(await screen.findByText(/The documents could not be listed: Internal server error/)).toBeVisible();
   });
 
   it("says so when the shipment is not found", async () => {

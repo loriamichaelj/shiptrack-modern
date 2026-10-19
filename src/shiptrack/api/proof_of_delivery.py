@@ -1,4 +1,4 @@
-"""Proof-of-delivery upload and download (REM-05)."""
+"""Proof-of-delivery upload, download (REM-05), and list (ADR-0040)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,11 @@ from shiptrack.api.deps import get_shipment_or_404, parse_uuid
 from shiptrack.api.errors import ApiError, not_found
 from shiptrack.db.models import ProofOfDeliveryDocument
 from shiptrack.db.session import get_session
-from shiptrack.domain.models import ProofOfDeliveryOut
+from shiptrack.domain.models import (
+    ProofOfDeliveryList,
+    ProofOfDeliveryListItem,
+    ProofOfDeliveryOut,
+)
 from shiptrack.ports import ObjectStore, PayloadTooLargeError
 from shiptrack.storage.common import is_legacy_file_uri
 
@@ -25,6 +29,8 @@ log = structlog.get_logger("shiptrack.proof_of_delivery")
 router = APIRouter(prefix="/api/v1")
 
 MAX_PROOF_OF_DELIVERY_BYTES = 10 * 1024 * 1024
+# The list returns the newest documents only; a shipment has a handful in practice.
+LIST_LIMIT = 100
 ALLOWED_CONTENT_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg"})
 
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -85,6 +91,34 @@ def upload_proof_of_delivery(
         size_bytes=document.size_bytes,
         sha256=document.sha256,
         uploaded_at=document.uploaded_at,
+    )
+
+
+@router.get("/shipments/{shipment_id}/pod", response_model=ProofOfDeliveryList)
+def list_proof_of_delivery(
+    shipment_id: str, request: Request, session: SessionDep
+) -> ProofOfDeliveryList:
+    shipment = get_shipment_or_404(session, shipment_id)
+    store: ObjectStore = request.app.state.proof_of_delivery_store
+    documents = session.scalars(
+        select(ProofOfDeliveryDocument)
+        .where(ProofOfDeliveryDocument.shipment_id == shipment.id)
+        .order_by(ProofOfDeliveryDocument.uploaded_at.desc(), ProofOfDeliveryDocument.id.desc())
+        .limit(LIST_LIMIT)
+    )
+    return ProofOfDeliveryList(
+        items=[
+            ProofOfDeliveryListItem(
+                document_id=document.id,
+                shipment_id=document.shipment_id,
+                content_type=document.content_type,
+                size_bytes=document.size_bytes,
+                sha256=document.sha256,
+                uploaded_at=document.uploaded_at,
+                available=store.locate(document.storage_uri) is not None,
+            )
+            for document in documents
+        ]
     )
 
 

@@ -74,7 +74,11 @@ on load and every 15 s, and the page is complete when the server stops returning
 show the totals, the shipments on the way, delivered (with its share), overdue (with how many the SLA
 scan flagged), and exceptions, with a status donut and shipments by carrier.
 
-The table filters by tracking number, carrier, status, and overdue, and links to each shipment.
+The table filters by tracking number, origin or destination, carrier, status, and overdue, and links to
+each shipment. It is newest first; a click on a column header sorts by that column, and a second click
+turns the order round. **Download CSV** saves the rows that match the filters, every one of them and in the
+table's order, as a file made in the browser. Text that a spreadsheet would run as a formula is prefixed
+with an apostrophe, because origin and destination are whatever a client sent.
 
 ### New shipment
 

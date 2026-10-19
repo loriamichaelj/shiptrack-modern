@@ -21,6 +21,8 @@ clears them.
 
 - **The header** links the pages. While synthetic traffic runs it shows a **LIVE** pill with the rate
   and a Stop button, so traffic keeps going when you open another page.
+- **The theme switch** in the header picks the system's theme, light, or dark. The choice is kept in
+  this browser's local storage; System forgets it and follows the operating system again.
 - **API activity** opens a panel on the right that lists the latest 200 calls the UI made, from any page:
   method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the request and response bodies.
   The totals on the System page are counted apart and are not capped at 200.

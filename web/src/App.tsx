@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router";
 import { ApiInspector } from "./components/ApiInspector";
 import { StackBadge } from "./components/StackBadge";
+import { ThemeSwitch } from "./components/ThemeSwitch";
 import { Icon } from "./icons";
 import { LivePage } from "./pages/LivePage";
 import { NewShipmentPage } from "./pages/NewShipmentPage";
@@ -48,6 +49,7 @@ export function App() {
             <NavLink to="/system">System</NavLink>
           </nav>
           <LivePill />
+          <ThemeSwitch />
           <button
             type="button"
             className="ghost inspector-toggle"

@@ -1,5 +1,5 @@
-"""Request middleware: request IDs, the stack header, security headers, access logs, metrics, and
-the game-day fault injector (REM-08, REM-15, REM-16, design 5.9).
+"""Request middleware: request IDs, the stack, cloud, and region headers, security headers, access
+logs, metrics, and the game-day fault injector (REM-08, REM-15, REM-16, design 5.9, ADR-0039).
 
 These are plain ASGI middleware, not BaseHTTPMiddleware, so they add no per-request task and never
 buffer a streamed body.
@@ -86,9 +86,19 @@ def _internal_error(request_id: str) -> ASGIApp:
     return respond
 
 
+def identity_headers(settings: Settings) -> dict[str, str]:
+    """Which stack answered, and on which cloud and in which region (ADR-0039)."""
+    headers = {"X-ShipTrack-Stack": "modern", "X-ShipTrack-Cloud": settings.cloud}
+    region = settings.serving_region
+    if region:
+        headers["X-ShipTrack-Region"] = region
+    return headers
+
+
 class RequestContextMiddleware:
     def __init__(self, app: ASGIApp, settings: Settings) -> None:
         self.app = app
+        self._identity = identity_headers(settings)
         self._security = security_headers(settings.hsts_enabled)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -115,7 +125,8 @@ class RequestContextMiddleware:
                 status["code"] = message["status"]
                 out = MutableHeaders(scope=message)
                 out["X-Request-Id"] = request_id
-                out["X-ShipTrack-Stack"] = "modern"
+                for name, value in self._identity.items():
+                    out[name] = value
                 for name, value in self._security.items():
                     out[name] = value
             await send(message)

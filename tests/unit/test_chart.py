@@ -403,3 +403,9 @@ def test_a_gcp_render_needs_no_aws_values_and_names_no_real_project() -> None:
     )  # fmt: skip
     assert "example-project" in result.stdout  # placeholders only; real values arrive with --set
     assert "<ACCOUNT_ID>" not in result.stdout
+
+
+def test_gcp_passes_the_region_only_when_it_is_set() -> None:
+    assert gcp_env("shiptrack-api")["SHIPTRACK_REGION"] == "us-central1"
+    unset = render_gcp("--set-string", "gcp.region=")
+    assert "SHIPTRACK_REGION" not in gcp_env("shiptrack-api", unset)

@@ -4,6 +4,7 @@ import { StackBadge } from "../components/StackBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { Timeline } from "../components/Timeline";
 import { StackProvider, useStack } from "../stack";
+import type { ServerIdentity } from "../stackProbe";
 import { trackView } from "./helpers";
 
 describe("StatusBadge", () => {
@@ -72,11 +73,29 @@ describe("StackBadge", () => {
 describe("the stack of the page", () => {
   it("is shown as soon as the probe answers, before any API call", async () => {
     render(
-      <StackProvider probe={() => Promise.resolve("legacy")}>
+      <StackProvider probe={() => Promise.resolve({ stack: "legacy", cloud: null, region: null })}>
         <StackBadge />
       </StackProvider>,
     );
     expect(await screen.findByText("Served by: legacy")).toBeInTheDocument();
+  });
+
+  it("names the cloud and region when the probe has them", async () => {
+    render(
+      <StackProvider probe={() => Promise.resolve({ stack: "modern", cloud: "aws", region: "us-east-1" })}>
+        <StackBadge />
+      </StackProvider>,
+    );
+    expect(await screen.findByText("Served by: modern · AWS us-east-1")).toBeInTheDocument();
+  });
+
+  it("names the cloud alone when the region is not known", async () => {
+    render(
+      <StackProvider probe={() => Promise.resolve({ stack: "modern", cloud: "gcp", region: null })}>
+        <StackBadge />
+      </StackProvider>,
+    );
+    expect(await screen.findByText("Served by: modern · GCP")).toBeInTheDocument();
   });
 
   it("stays a dash when the probe has no answer", async () => {
@@ -93,9 +112,9 @@ describe("the stack of the page", () => {
   });
 
   it("does not overwrite the stack of an API response that arrived first", async () => {
-    let answer: (stack: string) => void = () => undefined;
+    let answer: (identity: ServerIdentity) => void = () => undefined;
     const slow = () =>
-      new Promise<string | null>((resolve) => {
+      new Promise<ServerIdentity | null>((resolve) => {
         answer = resolve;
       });
     function Setter() {
@@ -119,7 +138,7 @@ describe("the stack of the page", () => {
     );
     screen.getByRole("button").click();
     expect(await screen.findByText("Served by: modern")).toBeInTheDocument();
-    answer("legacy");
+    answer({ stack: "legacy", cloud: null, region: null });
     await Promise.resolve();
     expect(screen.getByText("Served by: modern")).toBeInTheDocument();
   });
@@ -135,7 +154,7 @@ describe("probeStack", () => {
       Promise.resolve(new Response("<html></html>", { headers: { "X-ShipTrack-Stack": "modern" } })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    expect(await (await real())()).toBe("modern");
+    expect(await (await real())()).toEqual({ stack: "modern", cloud: null, region: null });
     // The base path of the build: "/ui/" in the image, whatever the test runner uses here.
     expect(fetchMock).toHaveBeenCalledWith(
       import.meta.env.BASE_URL,
@@ -150,7 +169,21 @@ describe("probeStack", () => {
         Promise.resolve(new Response("no", { status: 404, headers: { "X-ShipTrack-Stack": "legacy" } })),
       ),
     );
-    expect(await (await real())()).toBe("legacy");
+    expect(await (await real())()).toEqual({ stack: "legacy", cloud: null, region: null });
+  });
+
+  it("reads the cloud and region that modern sends", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response("<html></html>", {
+            headers: { "X-ShipTrack-Stack": "modern", "X-ShipTrack-Cloud": "gcp", "X-ShipTrack-Region": "us-central1" },
+          }),
+        ),
+      ),
+    );
+    expect(await (await real())()).toEqual({ stack: "modern", cloud: "gcp", region: "us-central1" });
   });
 
   it("is null when the header is absent or the request fails", async () => {

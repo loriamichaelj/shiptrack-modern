@@ -68,3 +68,16 @@ def test_an_unknown_log_level_is_rejected() -> None:
 )
 def test_hsts_only_when_the_base_url_is_https(base_url: str, expected: bool) -> None:
     assert Settings(base_url=base_url).hsts_enabled is expected
+
+
+def test_the_region_falls_back_to_aws_region_on_aws_only() -> None:
+    assert Settings(aws_region="us-east-1").serving_region == "us-east-1"
+    assert Settings(aws_region="us-east-1", region="eu-west-1").serving_region == "eu-west-1"
+    assert Settings(cloud="gcp", aws_region="us-east-1").serving_region is None
+    assert Settings(cloud="gcp", region="us-central1").serving_region == "us-central1"
+
+
+@pytest.mark.parametrize("region", ["US-EAST-1", "us east", "us-east-1\r\nX-Evil: 1", ""])
+def test_a_region_is_a_plain_name(region: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(region=region)

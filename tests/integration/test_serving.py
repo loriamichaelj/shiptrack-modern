@@ -13,7 +13,7 @@ from prometheus_client import generate_latest
 from shiptrack.api.ui import has_inline_code
 from shiptrack.config import Settings
 from shiptrack.main import create_app
-from shiptrack.middleware import CSP, security_headers
+from shiptrack.middleware import CSP, identity_headers, security_headers
 from shiptrack.ops import start_ops_server
 
 SHELL = (
@@ -48,6 +48,20 @@ def test_security_headers_are_on_every_response(client: TestClient) -> None:
         assert response.headers["content-security-policy"] == CSP
         assert response.headers["x-content-type-options"] == "nosniff"
         assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+
+
+def test_every_response_names_the_stack_cloud_and_region(client: TestClient) -> None:
+    for response in (client.get("/"), client.get("/api/v1/shipments"), client.get("/api/v1/x")):
+        assert response.headers["x-shiptrack-stack"] == "modern"
+        assert response.headers["x-shiptrack-cloud"] == "aws"
+        assert response.headers["x-shiptrack-region"] == "us-east-1"
+
+
+def test_the_region_header_is_left_out_when_the_region_is_unknown(settings: Settings) -> None:
+    gcp = settings.model_copy(update={"cloud": "gcp", "region": None})
+    assert identity_headers(gcp) == {"X-ShipTrack-Stack": "modern", "X-ShipTrack-Cloud": "gcp"}
+    named = gcp.model_copy(update={"region": "us-central1"})
+    assert identity_headers(named)["X-ShipTrack-Region"] == "us-central1"
 
 
 def test_the_csp_allows_no_inline_code_and_no_framing() -> None:

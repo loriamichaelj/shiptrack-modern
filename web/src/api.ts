@@ -3,6 +3,8 @@ import { loggedFetch } from "./apiLog";
 
 export const TRACKING_NUMBER_PATTERN = /^MF\d{10}$/;
 export const STACK_HEADER = "X-ShipTrack-Stack";
+export const CLOUD_HEADER = "X-ShipTrack-Cloud";
+export const REGION_HEADER = "X-ShipTrack-Region";
 
 export type ShipmentStatus =
   | "CREATED"

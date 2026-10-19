@@ -327,7 +327,7 @@ URLs and cache headers are identical to legacy (contract); the HTML and assets a
 | `/ui/shipments/:id` | Details, progress, history; sends an event with a generated `Idempotency-Key`; uploads proof of delivery (PDF, PNG, JPEG, up to 10 MiB), lists the shipment's documents (ADR-0040), and opens them; after an event is sent it reads the shipment again at 1.5, 4, and 8 s | `GET /api/v1/shipments/{id}`, `POST …/events`, `GET …/pod`, `POST …/pod`, `GET …/pod/{doc}` |
 | `/ui/system` | Readiness, the serving stack, every API call made since the page loaded (the list keeps the latest 200), the shipments held in the browser and when they were last synced, and an explorer of four read-only calls | `GET /readyz`, `/healthz`, `/api/v1/shipments?limit=3`, `/api/v1/track/{unknown}` |
 
-One runtime sits above the router: the traffic engine and a store of shipments, so every page shows the same data and traffic continues when another page is open (ADR-0026). The header shows a LIVE pill with a Stop control while traffic runs. An **API activity** panel lists the latest 200 calls the page made (method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the bodies); the totals are counted separately and are not capped. The stack badge asks for the UI's own base path on load and reads `X-ShipTrack-Stack`, `X-ShipTrack-Cloud`, and `X-ShipTrack-Region`. The site icon is `web/src/favicon.svg`, built into `/ui/assets/` like any asset (a truck on the header's gradient). Charts are SVG with presentation attributes and icons are inline SVG, so the CSP below needs no allowance; a document is shown by its same-origin URL (`img-src 'self'`), never a `blob:` URL.
+One runtime sits above the router: the traffic engine and a store of shipments, so every page shows the same data and traffic continues when another page is open (ADR-0026). The header shows a LIVE pill with a Stop control while traffic runs. An **API activity** panel lists the latest 200 calls the page made (method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the bodies); the totals are counted separately and are not capped. The stack badge asks for the UI's own base path on load and reads `X-ShipTrack-Stack`, `X-ShipTrack-Cloud`, and `X-ShipTrack-Region`. The UI shows legacy as v1 and modern as v3; the header values are unchanged (ADR-0041). The site icon is `web/src/favicon.svg`, built into `/ui/assets/` like any asset (a truck on the header's gradient). Charts are SVG with presentation attributes and icons are inline SVG, so the CSP below needs no allowance; a document is shown by its same-origin URL (`img-src 'self'`), never a `blob:` URL.
 
 **Security headers** (middleware, every port-8000 response):
 - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`
@@ -765,7 +765,7 @@ The final presentation requires **at least 3** of these, with numbers.
 8. Exactly one `sla_alerts` row per breached shipment after Wave 3 (REM-09 evidence).
 9. SLOs, burn-rate alarms, dashboards, and runbooks exist. GD-1…GD-4 have evidence folders.
 10. Wave 0–3 evidence is stored per §9.3. The cost analysis contains ≥ 3 optimization actions with numbers.
-11. `/ui/` serves modern's own build, carries the REM-16 headers, and its stack badge shows `modern`.
+11. `/ui/` serves modern's own build, carries the REM-16 headers, and its stack badge shows `v3`.
 
 ---
 

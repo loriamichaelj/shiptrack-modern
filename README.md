@@ -250,7 +250,7 @@ Modern serves all traffic. The cutover ran as Waves 0 to 2 (evidence in [`docs/m
 the schema handoff is done (modern owns it), the SLA scan runs as a CronJob, and legacy's cron jobs are
 removed. Legacy is kept running as a fallback on the preview port. Modern is on the main address; send
 `X-ShipTrack-Target: modern` with the test token to pin one request to it, and the UI's stack badge reads
-`modern`. The node-image findings accepted until 2026-11-10 are recorded in the decisions.
+`v3`. The node-image findings accepted until 2026-11-10 are recorded in the decisions.
 
 ## Local development
 

@@ -5,7 +5,7 @@ import { DonutChart } from "../components/Charts";
 import { LineChart } from "../components/LineChart";
 import { StatCard } from "../components/StatCard";
 import { STATUS_ICONS } from "../components/StatusBadge";
-import { statusLabel } from "../format";
+import { stackLabel, statusLabel } from "../format";
 import { Icon } from "../icons";
 import { CARRIERS, MAX_RATE, MIN_RATE, type FeedItem, type Snapshot } from "../live/engine";
 import { useRuntime, useEngine } from "../live/runtime";
@@ -111,7 +111,7 @@ export function LivePage() {
           <Icon name="refresh" size={16} /> Reset
         </button>
         <span className="muted">
-          {snap.inFlight} in flight · served by <strong>{snap.stack ?? "unknown"}</strong> · carriers {CARRIERS.join(", ")}
+          {snap.inFlight} in flight · served by <strong>{snap.stack === null ? "unknown" : stackLabel(snap.stack)}</strong> · carriers {CARRIERS.join(", ")}
         </span>
       </div>
       {snap.stoppedBecause !== null && <p className="muted" role="status">{snap.stoppedBecause}</p>}

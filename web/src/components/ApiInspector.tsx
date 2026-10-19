@@ -1,4 +1,5 @@
 import { clearApiCalls, useApiCalls, type ApiCall } from "../apiLog";
+import { stackLabel } from "../format";
 import { Icon } from "../icons";
 
 function tone(call: ApiCall): string {
@@ -26,7 +27,7 @@ export function ApiCallRow({ call }: { call: ApiCall }) {
           <dt>Time</dt>
           <dd>{time(call.at)} UTC</dd>
           <dt>Served by</dt>
-          <dd>{call.stack ?? "unknown"}</dd>
+          <dd>{call.stack === null ? "unknown" : stackLabel(call.stack)}</dd>
           <dt>Request id</dt>
           <dd>{call.requestId ?? "none"}</dd>
           {call.note !== null && (

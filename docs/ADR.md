@@ -556,3 +556,17 @@ The job has `continue-on-error: true`. A failure shows as a failed job with an e
 - The UI's Shipment page lists the server's documents and no longer keeps ids in local storage.
 
 **Consequences:** Every viewer sees every document of a shipment. `GET` on the upload path, which answered 405 before, now answers 200; the contract suite does not call it. Ids that browsers stored under `shiptrack.pods.*` are no longer read and stay until the browser's storage is cleared. A shipment with more than 100 documents shows the newest 100. If the table grows, the index is the follow-up.
+
+## ADR-0041: stack-version-labels
+
+**Status:** Accepted
+
+**Context:** The UI names the stack that answered in its footer, on the Live and System pages, and in the API activity panel, using the value of `X-ShipTrack-Stack`: `legacy` or `modern`. The user asked for the UI to call them v1 and v3 instead. The header is part of the contract that the platform suite checks and the cutover tooling reads.
+
+**Decision:**
+- The UI shows legacy as v1 and modern as v3. One function in `web/src/format.ts` maps the header value to its label, and a value it does not know is shown as it is.
+- `X-ShipTrack-Stack` keeps `legacy` and `modern`, and the badge's `data-stack` attribute keeps the header value.
+- Legacy's own UI shows the same labels (legacy ADR-0015).
+- Repository names, the design documents, and the decision records keep the names legacy and modern; only the UI documents describe the labels.
+
+**Consequences:** The page and the header use different names for the same stack. `docs/UI.md` says which label belongs to which header value. The labels change no API, no header, and no chart value, so AWS and GCP render the same, and the contract suite is unchanged.

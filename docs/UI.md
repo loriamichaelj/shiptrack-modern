@@ -37,17 +37,11 @@ each one through its statuses with an `Idempotency-Key`, and reads the track vie
 system answered. Shipments move through their statuses as events are accepted and then applied. A
 pulsing chip has an event the API accepted that the shipment does not show yet.
 
-![The Live page: a board of shipments by status, each column with its count and tracking-number chips](images/ui-live-board.png)
-
 The controls start and stop the traffic, set the rate, and reset the counters. The tiles show requests
 per second, success, latency, shipments created, events applied, and the lag from a `202` to the event
 showing.
 
-![The Live page's controls and six tiles: requests per second, success, latency p50 and p95, shipments created, events applied and sent, and apply lag](images/ui-live-controls.png)
-
 Throughput and latency per second, where the shipments are, and a feed of every call as it is made.
-
-![The Live page's throughput and latency charts, the shipments-by-status donut, and the live feed of accepted and applied events](images/ui-live-charts.png)
 
 The run is bounded:
 
@@ -66,8 +60,6 @@ The lookup validates a tracking number (`MF` and ten digits) before it navigates
 newest shipments the server lists as quick links, refreshed every 30 s, and cards that link
 to the other pages.
 
-![The Track page: a tracking number field, the five newest shipments, and cards linking to Live, Browse, New shipment, and System](images/ui-track.png)
-
 `/ui/track/<tracking number>` shows the status, a progress stepper, the carrier, the estimated
 delivery and the delivered time, and the event timeline. It refreshes every 30 s until the shipment is
 delivered, and it keeps the last known status when a refresh fails. A malformed number, an unknown one,
@@ -80,11 +72,7 @@ on load and every 15 s, and the page is complete when the server stops returning
 show the totals, the shipments on the way, delivered (with its share), overdue (with how many the SLA
 scan flagged), and exceptions, with a status donut and shipments by carrier.
 
-![The Browse page: totals, a status donut, and shipments by carrier](images/ui-browse.png)
-
 The table filters by tracking number, carrier, status, and overdue, and links to each shipment.
-
-![The Browse page's filter bar and table of shipments with status, carrier, route, promised, and created](images/ui-browse-table.png)
 
 ### New shipment
 
@@ -92,8 +80,6 @@ Creates one shipment with `POST /api/v1/shipments`. The tracking number comes ba
 a refusal shows the API's error envelope, and a success links to the shipment, its public tracking page,
 and Browse. The promised time uses the browser's time zone and is sent in
 UTC. A time in the past creates a shipment that is already overdue, which the SLA scan flags.
-
-![The New shipment form: carrier code, origin, destination, and promised delivery](images/ui-new-shipment.png)
 
 ### Shipment
 
@@ -113,8 +99,6 @@ Readiness, the stack that answered, call totals for the session, the shipments h
 when they were last synced, and an API explorer of four read-only calls (`/healthz`, `/readyz`, a page
 of shipments, and an unknown tracking number, which shows the error envelope). The activity panel on
 the right lists every call the page has made, from any page.
-
-![The System page: readiness, stack, latency, call totals, an API explorer, and the API activity panel listing recent calls](images/ui-system.png)
 
 ### How it is built
 

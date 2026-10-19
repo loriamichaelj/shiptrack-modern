@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { ShipmentStatus } from "../api";
+import { DEFAULT_SORT, downloadCsv, matchesPlace, nextSort, sortRows, type Sort, type SortKey } from "../browse";
 import { BarChart, DonutChart, type Segment } from "../components/Charts";
 import { StatCard } from "../components/StatCard";
 import { StatusBadge } from "../components/StatusBadge";
@@ -20,6 +21,27 @@ function isOverdue(row: Row, now: number): boolean {
   return row.status !== "DELIVERED" && Date.parse(row.promisedAt) < now;
 }
 
+const COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "trackingNumber", label: "Tracking number" },
+  { key: "status", label: "Status" },
+  { key: "carrier", label: "Carrier" },
+  { key: "route", label: "Route" },
+  { key: "promisedAt", label: "Promised" },
+  { key: "createdAt", label: "Created" },
+];
+
+function SortableHeader({ column, sort, onSort }: { column: (typeof COLUMNS)[number]; sort: Sort; onSort: (key: SortKey) => void }) {
+  const active = sort.key === column.key;
+  return (
+    <th aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : undefined}>
+      <button type="button" className="sort" onClick={() => { onSort(column.key); }}>
+        {column.label}
+        <span className="sort-mark" aria-hidden="true">{active ? (sort.direction === "asc" ? "▲" : "▼") : ""}</span>
+      </button>
+    </th>
+  );
+}
+
 export function ShipmentsPage() {
   const rows = useShipments();
   const sync = useSync();
@@ -30,6 +52,8 @@ export function ShipmentsPage() {
   const [carrier, setCarrier] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [text, setText] = useState("");
+  const [place, setPlace] = useState("");
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [showAll, setShowAll] = useState(false);
 
   const summary = useMemo(() => {
@@ -57,11 +81,15 @@ export function ShipmentsPage() {
       .filter((r) => status === "" || r.status === status)
       .filter((r) => carrier === "" || r.carrier === carrier)
       .filter((r) => !overdueOnly || isOverdue(r, now))
-      .filter((r) => needle === "" || r.trackingNumber.includes(needle));
+      .filter((r) => needle === "" || r.trackingNumber.includes(needle))
+      .filter((r) => matchesPlace(r, place));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, status, carrier, overdueOnly, text]);
+  }, [rows, status, carrier, overdueOnly, text, place]);
 
-  const visible = showAll ? filtered : filtered.slice(0, FIRST_ROWS);
+  const sorted = useMemo(() => sortRows(filtered, sort), [filtered, sort]);
+  const isDefaultSort = sort.key === DEFAULT_SORT.key && sort.direction === DEFAULT_SORT.direction;
+
+  const visible = showAll ? sorted : sorted.slice(0, FIRST_ROWS);
   const segments: Segment[] = STATUS_ORDER.map((s) => ({
     label: statusLabel(s),
     value: summary.byStatus[s],
@@ -137,6 +165,8 @@ export function ShipmentsPage() {
         <div className="filters">
           <label className="visually-hidden" htmlFor="f-text">Tracking number contains</label>
           <input id="f-text" type="text" placeholder="Filter by tracking number" value={text} onChange={(e) => { setText(e.target.value); }} />
+          <label className="visually-hidden" htmlFor="f-place">Origin or destination contains</label>
+          <input id="f-place" type="text" placeholder="Filter by origin or destination" value={place} onChange={(e) => { setPlace(e.target.value); }} />
           <label className="visually-hidden" htmlFor="f-carrier">Carrier</label>
           <select id="f-carrier" value={carrier} onChange={(e) => { setCarrier(e.target.value); }}>
             <option value="">All carriers</option>
@@ -148,6 +178,14 @@ export function ShipmentsPage() {
             <input type="checkbox" checked={overdueOnly} onChange={(e) => { setOverdueOnly(e.target.checked); }} />
             Overdue only
           </label>
+          <button
+            type="button"
+            className="ghost"
+            disabled={filtered.length === 0}
+            onClick={() => { downloadCsv(sorted, new Date()); }}
+          >
+            <Icon name="download" size={16} /> Download CSV
+          </button>
         </div>
         <div className="chips" role="group" aria-label="Filter by status">
           <button type="button" className={`chip ${status === "" ? "chip-on" : ""}`} aria-pressed={status === ""} onClick={() => { setStatus(""); }}>
@@ -167,12 +205,9 @@ export function ShipmentsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Tracking number</th>
-                  <th>Status</th>
-                  <th>Carrier</th>
-                  <th>Route</th>
-                  <th>Promised</th>
-                  <th>Created</th>
+                  {COLUMNS.map((column) => (
+                    <SortableHeader key={column.key} column={column} sort={sort} onSort={(key) => { setSort((current) => nextSort(current, key)); }} />
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -201,7 +236,7 @@ export function ShipmentsPage() {
         )}
         {!showAll && filtered.length > FIRST_ROWS && (
           <p className="muted">
-            Showing the newest {FIRST_ROWS} of {filtered.length}.{" "}
+            Showing the {isDefaultSort ? "newest" : "first"} {FIRST_ROWS} of {filtered.length}.{" "}
             <button type="button" className="ghost" onClick={() => { setShowAll(true); }}>
               Show all {filtered.length}
             </button>

@@ -816,10 +816,17 @@ button.ghost {
 
 .filters {
   display: grid;
-  grid-template-columns: minmax(10rem, 1.5fr) minmax(8rem, 1fr) auto;
+  grid-template-columns: minmax(10rem, 1.5fr) minmax(10rem, 1.5fr) minmax(8rem, 1fr) auto auto;
   align-items: center;
   gap: 0.6rem;
   margin-bottom: 0.75rem;
+}
+
+/* Two filters a row on narrow screens; one a row below 40rem (further down). */
+@media (max-width: 62rem) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .check {
@@ -877,6 +884,30 @@ table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
+}
+
+/* Sortable headers: the button looks like the header text it replaces. */
+th button.sort {
+  gap: 0.3rem;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+th button.sort:hover {
+  color: var(--fg);
+  filter: none;
+}
+
+.sort-mark {
+  display: inline-block;
+  min-width: 0.7rem;
+  font-size: 0.6rem;
 }
 
 th {

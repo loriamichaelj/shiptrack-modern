@@ -14,7 +14,7 @@ clears them.
 | [Track](#track) | `/ui/`, `/ui/track/<tracking number>` | `GET /api/v1/shipments` (the newest five), `GET /api/v1/track/{n}` |
 | [Browse](#browse) | `/ui/shipments` | `GET /api/v1/shipments`, every page |
 | [New shipment](#new-shipment) | `/ui/shipments/new` | `POST /api/v1/shipments` |
-| [Shipment](#shipment) | `/ui/shipments/<id>` | `GET /api/v1/shipments/{id}`, `POST …/events`, `POST …/pod`, `GET …/pod/{doc}` |
+| [Shipment](#shipment) | `/ui/shipments/<id>` | `GET /api/v1/shipments/{id}`, `POST …/events`, `GET …/pod`, `POST …/pod`, `GET …/pod/{doc}` |
 | [System](#system) | `/ui/system` | `GET /readyz`, `GET /healthz`, and two read-only samples |
 
 ### On every page
@@ -99,8 +99,10 @@ progress stepper, an SLA breach flag when there is one, and the history, and it 
   `Idempotency-Key` that it shows. Sending the same key again is a no-op. After a send the page reads
   the shipment again at 1.5, 4, and 8 s, because the event is applied by a worker after the `202`.
 - **Proof of delivery** uploads a PDF, PNG, or JPEG of up to 10 MiB and opens it from its same-origin
-  URL, which the API answers with a short-lived redirect to S3. The documents uploaded from this
-  browser are remembered in its local storage, because the API has no call that lists them.
+  URL, which the API answers with a short-lived redirect to the cloud's object storage. Below the form
+  is every document the shipment has, newest first, read from `GET …/pod` on load and again after an
+  upload, so every viewer sees the same list (ADR-0040). A document still on a legacy host and not yet
+  copied to storage is listed without a link, because its download answers 404 until the copy lands.
 
 ### System
 

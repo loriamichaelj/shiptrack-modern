@@ -43,6 +43,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0037 | `refetch-the-secret-when-a-login-is-rejected` | Accepted |
 | 0038 | `api-open-to-additive-change` | Accepted |
 | 0039 | `cloud-and-region-headers` | Accepted |
+| 0040 | `list-proof-of-delivery` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -539,3 +540,19 @@ The job has `continue-on-error: true`. A failure shows as a failed job with an e
 - The UI's footer shows the cloud and region next to the stack. It reads them from the probe of its own base path on load; legacy sends neither, so a page served by legacy names the stack alone.
 
 **Consequences:** A response says which cloud and region served it. Neither is secret, and the stack header already said which stack. The contract suite reads only `X-ShipTrack-Stack` and is unchanged. GCP shows its region once the GCP repository sets `gcp.region` and moves `deploy/chart-ref` to a chart with this switch; until then its footer names the cloud alone.
+
+## ADR-0040: list-proof-of-delivery
+
+**Status:** Accepted
+
+**Context:** The API can upload a proof-of-delivery document and redirect to one by its id, but it cannot say which documents a shipment has. The UI kept the ids of the documents uploaded from each browser in that browser's local storage, so a document uploaded elsewhere, from another browser, a client, or legacy, did not appear. The documents are rows in `pod_documents` with the shipment's id, on every cloud. ADR-0038 lets modern add endpoints.
+
+**Decision:**
+- `GET /api/v1/shipments/{id}/pod` returns `{"items": [...]}`: the shipment's documents, newest first by upload time, at most 100. Each item has the upload response's fields and `available`.
+- `available` is false for a document whose storage URI the cloud's object store does not serve: one uploaded to a legacy host and not yet copied (`file://`). Its download answers 404 until the copy lands, so the list says so instead of offering a link that fails.
+- An unknown or malformed shipment id answers 404 `NOT_FOUND`, as the other shipment routes do.
+- It reads the database only. It needs nothing from the cloud seam beyond `locate`, which every object store has, so it works on AWS and GCP alike.
+- No index is added. `pod_documents` has no index on `shipment_id`, and the query scans the table; a shipment has a handful of documents and the table is small. An index would be the first migration after `0001`, and while legacy shares the AWS database that is its own decision.
+- The UI's Shipment page lists the server's documents and no longer keeps ids in local storage.
+
+**Consequences:** Every viewer sees every document of a shipment. `GET` on the upload path, which answered 405 before, now answers 200; the contract suite does not call it. Ids that browsers stored under `shiptrack.pods.*` are no longer read and stay until the browser's storage is cleared. A shipment with more than 100 documents shows the newest 100. If the table grows, the index is the follow-up.

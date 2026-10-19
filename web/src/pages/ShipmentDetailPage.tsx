@@ -7,14 +7,17 @@ import { Timeline } from "../components/Timeline";
 import {
   EVENT_TYPES,
   getShipment,
+  listProofsOfDelivery,
   proofOfDeliveryUrl,
   postEvent,
+  PROOF_OF_DELIVERY_LIST_LIMIT,
   PROOF_OF_DELIVERY_MAX_BYTES,
   PROOF_OF_DELIVERY_TYPES,
   uploadProofOfDelivery,
   type ApiResult,
   type EventType,
-  type ProofOfDeliveryDocument,
+  type ListedProofOfDelivery,
+  type ProofOfDeliveryList,
   type Shipment,
 } from "../client";
 import { formatTimestamp, statusLabel } from "../format";
@@ -22,29 +25,10 @@ import { Icon } from "../icons";
 import { newIdempotencyKey } from "../keys";
 import { relativeTime } from "../stats";
 import { useStack } from "../stack";
+import { useNow } from "../useNow";
 import { localInput, toUtcIso } from "./NewShipmentPage";
 
 const REFRESH_DELAYS_MS = [1500, 4000, 8000];
-
-function readProofsOfDelivery(shipmentId: string): ProofOfDeliveryDocument[] {
-  try {
-    const raw = localStorage.getItem(`shiptrack.pods.${shipmentId}`);
-    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as ProofOfDeliveryDocument[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberProofOfDelivery(shipmentId: string, proof: ProofOfDeliveryDocument): ProofOfDeliveryDocument[] {
-  const all = [proof, ...readProofsOfDelivery(shipmentId)].slice(0, 10);
-  try {
-    localStorage.setItem(`shiptrack.pods.${shipmentId}`, JSON.stringify(all));
-  } catch {
-    /* private mode: the list lives only on this page */
-  }
-  return all;
-}
 
 export function ShipmentDetailPage() {
   const { id = "" } = useParams();
@@ -193,10 +177,22 @@ function EventForm({ shipment, onSent }: { shipment: Shipment; onSent: () => voi
 }
 
 function ProofOfDeliveryPanel({ shipmentId }: { shipmentId: string }) {
-  const [proofs, setProofs] = useState<ProofOfDeliveryDocument[]>(() => readProofsOfDelivery(shipmentId));
+  const [listed, setListed] = useState<ApiResult<ProofOfDeliveryList> | null>(null);
+  const [reload, setReload] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The server's list, so every viewer sees every document; read again after an upload.
+  useEffect(() => {
+    const controller = new AbortController();
+    void listProofsOfDelivery(shipmentId, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setListed(result);
+    });
+    return () => {
+      controller.abort();
+    };
+  }, [shipmentId, reload]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -208,8 +204,8 @@ function ProofOfDeliveryPanel({ shipmentId }: { shipmentId: string }) {
     const outcome = await uploadProofOfDelivery(shipmentId, file);
     setBusy(false);
     if (outcome.ok) {
-      setProofs(rememberProofOfDelivery(shipmentId, outcome.data));
       setFile(null);
+      setReload((n) => n + 1);
     } else {
       setProblem(outcome.message);
     }
@@ -221,29 +217,56 @@ function ProofOfDeliveryPanel({ shipmentId }: { shipmentId: string }) {
       <form className="form" onSubmit={(event) => void submit(event)} noValidate>
         <label htmlFor="proof-file">Document</label>
         <input id="proof-file" type="file" accept={PROOF_OF_DELIVERY_TYPES.join(",")} onChange={(e) => { setFile(e.target.files?.[0] ?? null); }} />
-        <p className="muted">PDF, PNG, or JPEG, up to 10 MiB. Stored in S3 by modern.</p>
+        <p className="muted">PDF, PNG, or JPEG, up to 10 MiB. Stored in object storage.</p>
         {problem !== null && <p className="error" role="alert">{problem}</p>}
         <button type="submit" disabled={busy}><Icon name="upload" size={16} /> {busy ? "Uploading…" : "Upload"}</button>
       </form>
-      {proofs.length > 0 && (
-        <div className="proofs">
-          <div className="call-title">Uploaded from this browser</div>
-          {proofs.map((proof) => (
-            <div key={proof.document_id} className="proof">
-              {proof.content_type.startsWith("image/") ? (
-                <img src={proofOfDeliveryUrl(shipmentId, proof.document_id)} alt="Proof of delivery" width="72" height="72" />
-              ) : (
-                <span className="proof-icon"><Icon name="file" size={28} /></span>
-              )}
-              <div>
-                <a href={proofOfDeliveryUrl(shipmentId, proof.document_id)} target="_blank" rel="noreferrer">Open document</a>
-                <div className="muted small">{proof.content_type} · {(proof.size_bytes / 1024).toFixed(1)} KiB</div>
-                <div className="muted small mono">sha256 {proof.sha256.slice(0, 16)}…</div>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="proofs">
+        <ProofOfDeliveryList shipmentId={shipmentId} listed={listed} />
+      </div>
+    </div>
+  );
+}
+
+function ProofOfDeliveryList({ shipmentId, listed }: { shipmentId: string; listed: ApiResult<ProofOfDeliveryList> | null }) {
+  const now = useNow(30_000);
+  if (listed === null) return <p className="muted" role="status">Reading the documents…</p>;
+  if (!listed.ok) return <p className="muted" role="status">The documents could not be listed: {listed.message}</p>;
+  const items = listed.data.items;
+  if (items.length === 0) return <p className="muted">No documents yet.</p>;
+  return (
+    <>
+      <div className="call-title">Documents ({items.length})</div>
+      {items.map((proof) => (
+        <ProofOfDeliveryItem key={proof.document_id} shipmentId={shipmentId} proof={proof} now={now} />
+      ))}
+      {items.length >= PROOF_OF_DELIVERY_LIST_LIMIT && (
+        <p className="muted small">Showing the newest {PROOF_OF_DELIVERY_LIST_LIMIT}.</p>
       )}
+    </>
+  );
+}
+
+function ProofOfDeliveryItem({ shipmentId, proof, now }: { shipmentId: string; proof: ListedProofOfDelivery; now: number }) {
+  const url = proofOfDeliveryUrl(shipmentId, proof.document_id);
+  return (
+    <div className="proof">
+      {proof.available && proof.content_type.startsWith("image/") ? (
+        <img src={url} alt="Proof of delivery" width="72" height="72" />
+      ) : (
+        <span className="proof-icon"><Icon name="file" size={28} /></span>
+      )}
+      <div>
+        {proof.available ? (
+          <a href={url} target="_blank" rel="noreferrer">Open document</a>
+        ) : (
+          <span className="muted">Still on a legacy host; it opens once it is copied to storage.</span>
+        )}
+        <div className="muted small">
+          {proof.content_type} · {(proof.size_bytes / 1024).toFixed(1)} KiB · <span title={formatTimestamp(proof.uploaded_at)}>uploaded {relativeTime(proof.uploaded_at, now)}</span>
+        </div>
+        <div className="muted small mono">sha256 {proof.sha256.slice(0, 16)}…</div>
+      </div>
     </div>
   );
 }

@@ -62,7 +62,7 @@ describe("StackBadge", () => {
       </StackProvider>,
     );
     screen.getByRole("button").click();
-    return screen.findByText("Served by: modern");
+    return screen.findByText("Served by: v3");
   });
 
   it("requires its provider", () => {
@@ -77,7 +77,7 @@ describe("the stack of the page", () => {
         <StackBadge />
       </StackProvider>,
     );
-    expect(await screen.findByText("Served by: legacy")).toBeInTheDocument();
+    expect(await screen.findByText("Served by: v1")).toBeInTheDocument();
   });
 
   it("names the cloud and region when the probe has them", async () => {
@@ -86,7 +86,7 @@ describe("the stack of the page", () => {
         <StackBadge />
       </StackProvider>,
     );
-    expect(await screen.findByText("Served by: modern · AWS us-east-1")).toBeInTheDocument();
+    expect(await screen.findByText("Served by: v3 · AWS us-east-1")).toBeInTheDocument();
   });
 
   it("names the cloud alone when the region is not known", async () => {
@@ -95,7 +95,7 @@ describe("the stack of the page", () => {
         <StackBadge />
       </StackProvider>,
     );
-    expect(await screen.findByText("Served by: modern · GCP")).toBeInTheDocument();
+    expect(await screen.findByText("Served by: v3 · GCP")).toBeInTheDocument();
   });
 
   it("stays a dash when the probe has no answer", async () => {
@@ -137,10 +137,10 @@ describe("the stack of the page", () => {
       </StackProvider>,
     );
     screen.getByRole("button").click();
-    expect(await screen.findByText("Served by: modern")).toBeInTheDocument();
+    expect(await screen.findByText("Served by: v3")).toBeInTheDocument();
     answer({ stack: "legacy", cloud: null, region: null });
     await Promise.resolve();
-    expect(screen.getByText("Served by: modern")).toBeInTheDocument();
+    expect(screen.getByText("Served by: v3")).toBeInTheDocument();
   });
 });
 

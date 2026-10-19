@@ -54,7 +54,7 @@ describe("shipments page", () => {
     expect(await screen.findByText(/3 shipments, in step with the server/)).toBeVisible();
     expect(String(lastCall(fetchMock)[0])).toContain("/api/v1/shipments?limit=100");
     expect(screen.getByRole("link", { name: "MF0000000002" })).toHaveAttribute("href", "/shipments/22222222-2222-2222-2222-22222222222b");
-    expect(screen.getByText("Served by: modern")).toBeVisible();
+    expect(screen.getByText("Served by: v3")).toBeVisible();
 
     const group = screen.getByRole("group", { name: "Filter by status" });
     await user.click(within(group).getByRole("button", { name: /Delivered/ }));
@@ -268,7 +268,7 @@ describe("system page and the activity panel", () => {
     stubFetch(jsonResponse({ ready: true, reason: null }, { stack: "modern" }));
     renderApp("/system");
     expect(await screen.findByText("Ready")).toBeVisible();
-    expect(screen.getByText("modern", { selector: ".stat-value" })).toBeVisible();
+    expect(screen.getByText("v3", { selector: ".stat-value" })).toBeVisible();
   });
 
   it("lists the calls the page has made, with their bodies", async () => {
@@ -282,6 +282,7 @@ describe("system page and the activity panel", () => {
     expect(within(panel).getByText(`/api/v1/track/${TRACKING_NUMBER}`)).toBeVisible();
     expect(within(panel).getByText("200")).toBeVisible();
     expect(getApiCalls()[0]?.stack).toBe("legacy");
+    expect(within(panel).getByText("v1")).toBeInTheDocument();
     await act(async () => {
       await user.click(within(panel).getByText("Clear"));
     });

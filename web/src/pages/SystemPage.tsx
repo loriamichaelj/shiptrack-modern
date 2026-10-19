@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiCallRow } from "../components/ApiInspector";
 import { getApiCalls, loggedFetch, MAX_CALLS, useApiCalls, useApiTotals, type ApiCall } from "../apiLog";
 import { readiness } from "../client";
+import { stackLabel } from "../format";
 import { Icon } from "../icons";
 import { StatCard } from "../components/StatCard";
 import { useShipments, useSync } from "../live/runtime";
@@ -74,7 +75,7 @@ export function SystemPage() {
           hint={health.reason ?? undefined}
           tone={health.ready === false ? "red" : "green"}
         />
-        <StatCard icon="server" label="Served by" value={health.stack ?? "unknown"} tone="violet" />
+        <StatCard icon="server" label="Served by" value={health.stack === null ? "unknown" : stackLabel(health.stack)} tone="violet" />
         <StatCard icon="activity" label="Readiness latency" value={health.ms === null ? "…" : `${health.ms} ms`} tone="blue" />
         <StatCard
           icon="database"

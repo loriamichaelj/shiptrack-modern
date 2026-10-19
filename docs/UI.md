@@ -27,7 +27,9 @@ clears them.
   method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the request and response bodies.
   The totals on the System page are counted apart and are not capped at 200.
 - **The footer** names the stack that served the page, and on modern the cloud and region, for example
-  `Served by: modern · AWS us-east-1`. The page asks for its own base path on load and reads
+  `Served by: v3 · AWS us-east-1`. The UI calls legacy v1 and modern v3 wherever it names a stack: the
+  footer, the Live page, the System page, and the API activity panel. The `X-ShipTrack-Stack` header
+  still says `legacy` or `modern` (ADR-0041). The page asks for its own base path on load and reads
   `X-ShipTrack-Stack`, `X-ShipTrack-Cloud`, and `X-ShipTrack-Region`, so the badge does not wait for a
   track request. Legacy sends no cloud, so its badge names the stack alone; a region the deployment
   does not set is left out.

@@ -1,3 +1,4 @@
+import { stackLabel } from "../format";
 import { useStack } from "../stack";
 
 const CLOUD_NAMES: Record<string, string> = { aws: "AWS", gcp: "GCP", azure: "Azure" };
@@ -11,7 +12,7 @@ export function StackBadge() {
   const where = cloud === null ? null : [CLOUD_NAMES[cloud] ?? cloud, region].filter(Boolean).join(" ");
   return (
     <span className="stack-badge" data-stack={stack ?? "unknown"} data-cloud={cloud ?? undefined}>
-      Served by: {stack ?? "—"}
+      Served by: {stack === null ? "—" : stackLabel(stack)}
       {where !== null && ` · ${where}`}
     </span>
   );

@@ -39,8 +39,9 @@ clears them.
 
 The page drives synthetic traffic through the public API from the browser: it creates shipments, sends
 each one through its statuses with an `Idempotency-Key`, and reads the track view. It then shows how the
-system answered. Shipments move through their statuses as events are accepted and then applied. A
-pulsing chip has an event the API accepted that the shipment does not show yet.
+system answered. Shipments move through their statuses as events are accepted and then applied. The
+board has a card per status, with the status's icon, name, and count above it. A pulsing chip has an
+event the API accepted that the shipment does not show yet.
 
 The controls start and stop the traffic, set the rate, and reset the counters. The tiles show requests
 per second, success, latency, shipments created, events applied, and the lag from a `202` to the event

@@ -1232,6 +1232,48 @@ pre {
   overflow-x: auto;
 }
 
+/* A lane is a status: its title above, its card below. The lanes share their rows, so a title that
+   wraps to two lines ("Out for delivery" on a narrow board) moves every card in the row down with it. */
+.lane {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  row-gap: 0.4rem;
+  min-width: 0;
+}
+
+.lane-created { --tone: var(--s-created); }
+.lane-picked-up { --tone: var(--s-picked-up); }
+.lane-in-transit { --tone: var(--s-in-transit); }
+.lane-out-for-delivery { --tone: var(--s-out-for-delivery); }
+.lane-delivered { --tone: var(--s-delivered); }
+.lane-exception { --tone: var(--s-exception); }
+
+.lane-title {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0 0.2rem;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.lane-title .icon {
+  color: var(--tone);
+}
+
+.lane-label {
+  min-width: 0;
+  color: var(--tone);
+}
+
+.lane-count {
+  margin-left: auto;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Two rows of three below a width where six columns would need to scroll, and two across on a phone. */
 @media (max-width: 68rem) {
   .board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1248,36 +1290,6 @@ pre {
   background: color-mix(in srgb, var(--tone, var(--line)) 7%, var(--bg));
   border: 1px solid var(--line);
   border-radius: 0.7rem;
-}
-
-.column-created { --tone: var(--s-created); }
-.column-picked-up { --tone: var(--s-picked-up); }
-.column-in-transit { --tone: var(--s-in-transit); }
-.column-out-for-delivery { --tone: var(--s-out-for-delivery); }
-.column-delivered { --tone: var(--s-delivered); }
-.column-exception { --tone: var(--s-exception); }
-
-/* A badge such as "Out for delivery" can be as wide as a column: the count wraps under it
-   instead of spilling over the column's edge. */
-.column-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.2rem 0.4rem;
-  margin-bottom: 0.5rem;
-}
-
-.column-head .badge {
-  max-width: 100%;
-  padding: 0.1rem 0.5rem;
-  font-size: 0.85rem;
-}
-
-.column-count {
-  margin-left: auto;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
 }
 
 .column-body {

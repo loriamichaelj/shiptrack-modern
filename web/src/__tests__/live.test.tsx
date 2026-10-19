@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -320,6 +320,20 @@ describe("live page", () => {
     const board = screen.getByRole("group", { name: "Shipments by status" });
     const rate = screen.getByText("Requests per second");
     expect(board.compareDocumentPosition(rate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("titles each status above its card, with its count", () => {
+    const engine = engineFor(fakeApi().api);
+    renderLive(engine);
+    const board = screen.getByRole("group", { name: "Shipments by status" });
+    const titles = within(board).getAllByRole("heading", { level: 3 });
+    expect(titles.map((t) => t.textContent)).toEqual([
+      "Created0", "Picked up0", "In transit0", "Out for delivery0", "Delivered0", "Exception0",
+    ]);
+    for (const title of titles) {
+      expect(title.nextElementSibling).toHaveClass("column");
+      expect(title.querySelector("svg")).toHaveAttribute("width", "22");
+    }
   });
 
   it("labels each throughput line with its own rate for the last second", async () => {

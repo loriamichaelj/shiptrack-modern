@@ -4,7 +4,7 @@ import type { ShipmentStatus } from "../api";
 import { DonutChart } from "../components/Charts";
 import { LineChart } from "../components/LineChart";
 import { StatCard } from "../components/StatCard";
-import { StatusBadge } from "../components/StatusBadge";
+import { STATUS_ICONS } from "../components/StatusBadge";
 import { statusLabel } from "../format";
 import { Icon } from "../icons";
 import { CARRIERS, MAX_RATE, MIN_RATE, type FeedItem, type Snapshot } from "../live/engine";
@@ -60,17 +60,20 @@ export function LivePage() {
           {COLUMNS.map((status) => {
             const cards = snap.board.filter((c) => c.status === status).slice(-14).reverse();
             return (
-              <div key={status} className={`column column-${status.toLowerCase().replaceAll("_", "-")}`}>
-                <div className="column-head">
-                  <StatusBadge status={status} />
-                  <span className="column-count">{counts[status]}</span>
-                </div>
-                <div className="column-body">
-                  {cards.map((card) => (
-                    <span key={card.id} className={`ship mono ${card.pending !== null ? "ship-pending" : ""}`} title={card.pending !== null ? `${card.pending} accepted, not shown yet` : card.trackingNumber}>
-                      …{card.trackingNumber.slice(-5)}
-                    </span>
-                  ))}
+              <div key={status} className={`lane lane-${status.toLowerCase().replaceAll("_", "-")}`}>
+                <h3 className="lane-title">
+                  <Icon name={STATUS_ICONS[status] ?? "info"} size={22} />
+                  <span className="lane-label">{statusLabel(status)}</span>
+                  <span className="lane-count">{counts[status]}</span>
+                </h3>
+                <div className="column">
+                  <div className="column-body">
+                    {cards.map((card) => (
+                      <span key={card.id} className={`ship mono ${card.pending !== null ? "ship-pending" : ""}`} title={card.pending !== null ? `${card.pending} accepted, not shown yet` : card.trackingNumber}>
+                        …{card.trackingNumber.slice(-5)}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             );

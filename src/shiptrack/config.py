@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SHIPTRACK_", extra="ignore")
 
     cloud: Literal["aws", "gcp"] = "aws"
+    # The region this deployment runs in, sent as X-ShipTrack-Region (ADR-0039). On AWS, AWS_REGION
+    # is used when it is unset.
+    region: str | None = Field(default=None, pattern=r"^[a-z0-9-]{1,40}$")
 
     # Credentials: the ARN of the secret, never the secret itself.
     db_secret_arn: str | None = None
@@ -90,6 +93,12 @@ class Settings(BaseSettings):
     @property
     def schema_compat_revisions(self) -> frozenset[str]:
         return frozenset(part.strip() for part in self.schema_compat.split(",") if part.strip())
+
+    @property
+    def serving_region(self) -> str | None:
+        if self.region:
+            return self.region
+        return self.aws_region if self.cloud == "aws" else None
 
     @property
     def hsts_enabled(self) -> bool:

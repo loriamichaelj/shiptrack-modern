@@ -26,8 +26,11 @@ clears them.
 - **API activity** opens a panel on the right that lists the latest 200 calls the UI made, from any page:
   method, URL, status, time, `X-ShipTrack-Stack`, `X-Request-Id`, and the request and response bodies.
   The totals on the System page are counted apart and are not capped at 200.
-- **The footer** names the stack that served the page. The page asks for its own base path on load and
-  reads `X-ShipTrack-Stack`, so the badge does not wait for a track request.
+- **The footer** names the stack that served the page, and on modern the cloud and region, for example
+  `Served by: modern · AWS us-east-1`. The page asks for its own base path on load and reads
+  `X-ShipTrack-Stack`, `X-ShipTrack-Cloud`, and `X-ShipTrack-Region`, so the badge does not wait for a
+  track request. Legacy sends no cloud, so its badge names the stack alone; a region the deployment
+  does not set is left out.
 - **One runtime** sits above the router: the traffic engine and a store of shipments. Live, Track,
   Browse, and System read the same shipments, and a status never moves backwards when a late read
   arrives.

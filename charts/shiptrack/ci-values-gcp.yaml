@@ -15,6 +15,7 @@ scaling:
 
 gcp:
   project: example-project
+  region: us-central1
   dbSecretName: shiptrack-db-app
   dbMigratorSecretName: shiptrack-db-migrator
   eventsTopic: shiptrack-carrier-events

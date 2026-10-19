@@ -42,6 +42,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0036 | `no-plan-for-dependabot` | Accepted |
 | 0037 | `refetch-the-secret-when-a-login-is-rejected` | Accepted |
 | 0038 | `api-open-to-additive-change` | Accepted |
+| 0039 | `cloud-and-region-headers` | Accepted |
 
 ## ADR-0001: fork-strategy
 
@@ -524,3 +525,17 @@ The job has `continue-on-error: true`. A failure shows as a failed job with an e
 - A feature is not a remediation, so its pull request names no REM. Each feature is its own pull request.
 
 **Consequences:** Modern and legacy now differ in their APIs as well as their UIs. A rollback to legacy (`ops-rollback-cutover`) serves the legacy contract only. While it is in effect, the added endpoints and fields are gone. Data written to new tables and columns stays in the database, and legacy ignores it. The platform suite still proves the legacy contract on AWS and GCP, but it says nothing about the additions, so a release that breaks only an addition passes the deploy smoke. Amends ADR-0001 (the freeze) and ADR-0024 (the UI is built only on the existing API).
+
+## ADR-0039: cloud-and-region-headers
+
+**Status:** Accepted
+
+**Context:** The same image serves AWS and GCP (ADR-0032). The UI's footer reads `X-ShipTrack-Stack`, which says modern on both, so a page does not say which cloud answered it. ADR-0038 lets modern add response headers.
+
+**Decision:**
+- Every response from modern carries `X-ShipTrack-Cloud`, the value of `SHIPTRACK_CLOUD` (`aws` or `gcp`), next to `X-ShipTrack-Stack`. The same middleware sets both, so error responses carry them too.
+- `X-ShipTrack-Region` is sent when the region is known: `SHIPTRACK_REGION` when it is set, else `AWS_REGION` on AWS. The setting must be a plain name (lowercase letters, digits, and hyphens), so it cannot carry anything else into a header.
+- The chart sets `SHIPTRACK_REGION` on GCP from `gcp.region`, and only when it is set. The AWS render is unchanged: `AWS_REGION` already holds the region.
+- The UI's footer shows the cloud and region next to the stack. It reads them from the probe of its own base path on load; legacy sends neither, so a page served by legacy names the stack alone.
+
+**Consequences:** A response says which cloud and region served it. Neither is secret, and the stack header already said which stack. The contract suite reads only `X-ShipTrack-Stack` and is unchanged. GCP shows its region once the GCP repository sets `gcp.region` and moves `deploy/chart-ref` to a chart with this switch; until then its footer names the cloud alone.

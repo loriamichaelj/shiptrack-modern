@@ -69,6 +69,10 @@ capabilities:
   value: "gcp"
 - name: SHIPTRACK_GCP_PROJECT
   value: {{ required "gcp.project is required" .Values.gcp.project | quote }}
+{{- with .Values.gcp.region }}
+- name: SHIPTRACK_REGION
+  value: {{ . | quote }}
+{{- end }}
 {{ else -}}
 - name: AWS_REGION
   value: {{ .Values.region | quote }}

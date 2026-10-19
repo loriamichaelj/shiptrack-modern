@@ -35,6 +35,8 @@ aws:
 # secrets at deploy time. Credentials come from Workload Identity Federation for GKE, not from here.
 gcp:
   project: ""
+  # The cluster's region, shown in the UI's footer through X-ShipTrack-Region. Optional.
+  region: ""
   dbSecretName: ""
   dbMigratorSecretName: ""
   eventsTopic: ""

@@ -4,6 +4,9 @@ resource "aws_ecr_repository" "app" {
   name                 = "shiptrack/app"
   image_tag_mutability = "IMMUTABLE"
 
+  # Images keep the repository from being deleted. destroy-all sets this to true.
+  force_delete = var.ecr_force_delete
+
   encryption_configuration {
     encryption_type = "KMS"
     kms_key         = module.eks.kms_key_arn

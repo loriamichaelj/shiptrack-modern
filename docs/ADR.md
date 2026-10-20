@@ -570,3 +570,21 @@ The job has `continue-on-error: true`. A failure shows as a failed job with an e
 - Repository names, the design documents, and the decision records keep the names legacy and modern; only the UI documents describe the labels.
 
 **Consequences:** The page and the header use different names for the same stack. `docs/UI.md` says which label belongs to which header value. The labels change no API, no header, and no chart value, so AWS and GCP render the same, and the contract suite is unchanged.
+
+## ADR-0042: destroy-all-for-the-modern-stack
+
+**Status:** Accepted
+
+**Context:** The owner wants every ShipTrack resource on AWS to have a way to be taken down. The three AWS repositories cannot be destroyed from one place: each pipeline's apply role reaches only its own state, and its trust accepts only tokens of its own repository's `dev` environment (platform design §6.11). This stack is the costly one (the EKS control plane and nodes). The Helm release is not in Terraform's state, the cluster has `deletion_protection`, and the image repository cannot be deleted while it holds images.
+
+**Decision:** `destroy-all.yml` takes down this repository's AWS resources and nothing else. It has two jobs, each in the `dev` environment and each needing the owner's approval: a plan of both Terraform destroys, then the destroy. Both fail unless `confirm` is `all`. It uses the `tf-modern-dev` concurrency group of `apply-terraform`. The destroy job runs these steps in order:
+1. As `<PREFIX>-modern-deploy`: uninstall the `shiptrack` Helm release with `--wait`. That removes its `TargetGroupBinding`s, and the load balancer controller deregisters the pods from the platform's target groups. The step is skipped if the cluster is gone, if the deploy role has no rights in the namespace (the add-ons are gone), or if there is no release.
+2. As `<PREFIX>-modern-apply`: wait until no security group tagged `elbv2.k8s.aws/cluster=<cluster>` remains (10 minutes, then fail before anything else is touched). A group the controller leaves behind would block the platform's network, and only the running controller removes it.
+3. Destroy the `addons` root, if the cluster exists.
+4. Destroy the `cluster` root.
+
+`.github/scripts/terraform-destroy.sh` runs each Terraform destroy. It prints addresses and actions only. For the cluster root it first applies `module.eks.aws_eks_cluster.this[0]` and `aws_ecr_repository.app` with `eks_deletion_protection=false` and `ecr_force_delete=true`, then destroys with them still set. Both variables default to the protected value, so a normal apply changes nothing. The first step is skipped if its plan would create anything, so a run that stopped part-way can be dispatched again.
+
+The order across repositories is modern, then legacy, then platform. The `/shiptrack/modern/*` parameters are created by the `cluster` root and go with it, which is what the platform's `destroy-all` looks for. The `bootstrap` root is never destroyed by a workflow.
+
+**Consequences:** Every queued message and every image is deleted, and the Prometheus workspace's history with it. The cluster's own KMS key is scheduled for deletion by AWS, not removed at once. The application's data is the platform's and is dealt with there. The load balancer still answers for the platform's target groups but has no modern targets, so after this run the main address has nothing behind it unless legacy is behind it (cutover tooling, platform ADR-0032). That `<PREFIX>-modern-apply` has the delete actions for everything in these roots, that its token reaches the cluster for the add-ons destroy as it does for the apply, and that the controller tags its security groups as step 2 assumes are not yet proven **[VERIFY]**.

@@ -227,6 +227,7 @@ run "the_cluster_follows_the_design" {
     condition = alltrue([
       module.eks.cluster_name == "shiptrack",
       var.kubernetes_version == "1.36",
+      var.eks_deletion_protection,
     ])
     error_message = "The cluster is shiptrack on Kubernetes 1.36."
   }
@@ -259,6 +260,7 @@ run "the_registry_is_immutable_and_encrypted" {
     condition = alltrue([
       aws_ecr_repository.app.name == "shiptrack/app",
       aws_ecr_repository.app.image_tag_mutability == "IMMUTABLE",
+      !aws_ecr_repository.app.force_delete,
       one(aws_ecr_repository.app.encryption_configuration).encryption_type == "KMS",
     ])
     error_message = "shiptrack/app is IMMUTABLE and KMS-encrypted."

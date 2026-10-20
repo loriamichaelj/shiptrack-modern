@@ -648,7 +648,7 @@ All jobs upload SARIF to GitHub code scanning. Trivy exceptions live in `.trivyi
 - **DORA evidence:** the workflow emits commit timestamp → deploy-complete timestamp to `docs/migration/dora.csv` via the job summary (manually collected), to compare against the legacy deploy duration.
 
 ### 10.4 Terraform workflows
-Same pattern as platform §6.11, as a matrix over `cluster` and `addons`. Plan PR comments follow platform §6.12 (addresses and actions only; no plan artifacts). `addons` apply runs only after `cluster` apply succeeds in the same workflow. Pull request plans of `addons` do not refresh, because the plan role cannot read Secrets or RBAC objects (ADR-0018). `check-terraform-outputs.yml` is a read-only, by-hand workflow that prints `addon_versions` with the plan role, so the pins can be recorded without an apply (ADR-0013).
+Same pattern as platform §6.11, as a matrix over `cluster` and `addons`. Plan PR comments follow platform §6.12 (addresses and actions only; no plan artifacts). `addons` apply runs only after `cluster` apply succeeds in the same workflow. Pull request plans of `addons` do not refresh, because the plan role cannot read Secrets or RBAC objects (ADR-0018). `destroy-all.yml` takes the stack down by hand: it uninstalls the Helm release as the deploy role, then destroys the `addons` root and the `cluster` root, after two approvals and a typed confirmation (ADR-0042). `check-terraform-outputs.yml` is a read-only, by-hand workflow that prints `addon_versions` with the plan role, so the pins can be recorded without an apply (ADR-0013).
 
 ---
 

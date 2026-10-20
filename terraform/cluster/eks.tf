@@ -7,7 +7,7 @@ module "eks" {
 
   name                = local.cluster_name
   kubernetes_version  = var.kubernetes_version
-  deletion_protection = true
+  deletion_protection = var.eks_deletion_protection
 
   vpc_id     = local.platform.vpc_id
   subnet_ids = local.subnet_ids

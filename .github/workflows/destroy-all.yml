@@ -1,0 +1,182 @@
+name: destroy-all
+
+# Takes down the whole modern stack (ADR-0042): the application release, the add-ons (load balancer
+# controller, KEDA, Grafana, the namespaces), and the cluster root (the EKS cluster and its node group,
+# the queues, the image repository with every image, the managed Prometheus workspace, the alarms, the
+# roles, the cluster's key, and the `/shiptrack/modern/*` contract). EVERY QUEUED MESSAGE AND EVERY IMAGE IS
+# DELETED. The platform stack (database, load balancer, network, keys) and the bootstrap roles are not
+# touched. Two jobs, each in the `dev` environment and each needing the owner's approval: the first shows
+# the addresses and actions of both destroys, the second runs them in order. Both fail unless `confirm` is
+# exactly `all`.
+#
+# Run it first of the three destroy-all workflows: legacy's and the platform's come after. A run that stops
+# part-way can be dispatched again: what is already gone is skipped, and the rest is planned afresh.
+#
+# The order matters. The Helm release is not in Terraform's state, so it is uninstalled first, as the deploy
+# role; that removes its TargetGroupBindings and lets the controller deregister the pods from the platform's
+# target groups. The add-ons come next, while the controller can still clean up, and the cluster last.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type all to take the modern stack down"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tf-modern-dev
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.16.4"
+  RELEASE: shiptrack
+  NAMESPACE: shiptrack
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_VAR_owner: ${{ github.repository_owner }}
+      TF_VAR_role_prefix: ${{ vars.ROLE_PREFIX }}
+      TF_VAR_admin_role_arns: ${{ vars.ADMIN_ROLE_ARNS || '[]' }}
+      CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Check the confirmation
+        run: |
+          [[ "$CONFIRM" == all ]] || { echo "::error::The confirmation does not match. Type all to take the modern stack down."; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      # The add-ons root reads the cluster, so it can be planned only while the cluster exists.
+      - name: Look for the cluster
+        id: cluster
+        run: |
+          if aws ssm get-parameter --name /shiptrack/modern/cluster_name >/dev/null 2>&1; then
+            echo "present=true" >>"$GITHUB_OUTPUT"
+            echo "The cluster exists."
+          else
+            echo "present=false" >>"$GITHUB_OUTPUT"
+            echo "There is no cluster; the add-ons are skipped."
+          fi
+      - name: Plan the add-ons
+        if: steps.cluster.outputs.present == 'true'
+        run: .github/scripts/terraform-destroy.sh addons plan all
+      - name: Plan the cluster root
+        run: .github/scripts/terraform-destroy.sh cluster plan all
+
+  destroy:
+    needs: plan
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    timeout-minutes: 120
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_VAR_owner: ${{ github.repository_owner }}
+      TF_VAR_role_prefix: ${{ vars.ROLE_PREFIX }}
+      TF_VAR_admin_role_arns: ${{ vars.ADMIN_ROLE_ARNS || '[]' }}
+      CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Check the confirmation
+        run: |
+          [[ "$CONFIRM" == all ]] || { echo "::error::The confirmation does not match. Type all to take the modern stack down."; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The release is Kubernetes objects, so it is removed as the deploy role. If the cluster went first, the
+      # controller could not deregister the pods from the platform's target groups.
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Look for the cluster
+        id: cluster
+        run: |
+          if aws ssm get-parameter --name /shiptrack/modern/cluster_name >/dev/null 2>&1; then
+            echo "present=true" >>"$GITHUB_OUTPUT"
+            echo "The cluster exists."
+          else
+            echo "present=false" >>"$GITHUB_OUTPUT"
+            echo "There is no cluster; the release and the add-ons are skipped."
+          fi
+      - name: Connect to the cluster
+        if: steps.cluster.outputs.present == 'true'
+        run: |
+          cluster=$(aws ssm get-parameter --name /shiptrack/modern/cluster_name --query Parameter.Value --output text)
+          aws eks update-kubeconfig --name "$cluster" --alias shiptrack >/dev/null
+      # Without the add-ons the deploy role has no rights in the namespace (its Role goes with it), and the
+      # release went with the namespace.
+      - name: Uninstall the release
+        if: steps.cluster.outputs.present == 'true'
+        run: |
+          if ! kubectl auth can-i delete deployments --namespace "$NAMESPACE" >/dev/null 2>&1; then
+            echo "The deploy role has no rights in the ${NAMESPACE} namespace, so the add-ons are gone; no release to uninstall."
+            exit 0
+          fi
+          if ! helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "There is no release named ${RELEASE}."
+            exit 0
+          fi
+          helm uninstall "$RELEASE" -n "$NAMESPACE" --wait --timeout 10m
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      # The controller tags what it creates with the cluster's name. A security group it leaves behind
+      # blocks the platform's network later, and it can only be cleaned up while the controller runs, so
+      # this waits for none to be left (10 minutes, then fails before the add-ons are touched).
+      - name: Wait for the controller's security groups to go
+        if: steps.cluster.outputs.present == 'true'
+        run: |
+          cluster=$(aws ssm get-parameter --name /shiptrack/modern/cluster_name --query Parameter.Value --output text)
+          for attempt in $(seq 1 20); do
+            left=$(aws ec2 describe-security-groups --filters "Name=tag:elbv2.k8s.aws/cluster,Values=${cluster}" --query 'length(SecurityGroups)' --output text)
+            if [[ "$left" == 0 ]]; then
+              echo "The controller has left no security groups."
+              exit 0
+            fi
+            echo "${left} security group(s) of the controller remain; waiting (${attempt} of 20)."
+            sleep 30
+          done
+          echo "::error::The controller's security groups did not go. Nothing else was touched."
+          exit 1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      # A fresh plan is made in each step and applied from the same step; no plan file is uploaded.
+      - name: Destroy the add-ons
+        if: steps.cluster.outputs.present == 'true'
+        run: .github/scripts/terraform-destroy.sh addons destroy all
+      # The protection is lowered on the cluster and the image repository only.
+      - name: Destroy the cluster root
+        env:
+          UNPROTECT_VARS: eks_deletion_protection=false ecr_force_delete=true
+          UNPROTECT_TARGETS: module.eks.aws_eks_cluster.this[0] aws_ecr_repository.app
+        run: .github/scripts/terraform-destroy.sh cluster destroy all

@@ -88,3 +88,15 @@ variable "enable_amp_scraper" {
   type        = bool
   default     = true
 }
+
+variable "eks_deletion_protection" {
+  description = "Refuse to delete the cluster. True except in the destroy-all workflow, which lowers it for the destroy (ADR-0042)."
+  type        = bool
+  default     = true
+}
+
+variable "ecr_force_delete" {
+  description = "Let Terraform delete the image repository with its images. False except in the destroy-all workflow (ADR-0042)."
+  type        = bool
+  default     = false
+}
